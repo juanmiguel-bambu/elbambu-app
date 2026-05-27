@@ -1,23 +1,50 @@
 import { useState, useEffect } from 'react'
-import { auth, messaging } from './firebase'
+import { auth, db } from './firebase'
 import { signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth'
-import { getToken, onMessage } from 'firebase/messaging'
-import { getFirestore, doc, setDoc } from 'firebase/firestore'
+import { doc, setDoc } from 'firebase/firestore'
 
-const db = getFirestore()
-const VAPID_KEY = 'BE6g5fMBBNjlX1SJX5x3v3NXNAJHbRMekYzcQlQQ-JFpC6uyzwCA_kaA_p7wW-jTyxAho-9ZWhCOm2jauh92yel'
+const VAPID_PUBLIC_KEY = 'BOAhRPgcEJBXM_KsBk9TfegDoZBNPCLD6wdLT8d004bgHMdv7vJQ-nNepGusUZzWheRmq-bzG2mc6su8bawV8FM'
 
-async function registrarToken(uid) {
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)))
+}
+
+async function registrarPush(uid) {
   try {
-    const permission = await Notification.requestPermission()
-    if (permission !== 'granted') return
-    const token = await getToken(messaging, { vapidKey: VAPID_KEY })
-    if (token) {
-      await setDoc(doc(db, 'fcmTokens', uid), { token, uid, updatedAt: new Date() })
-      console.log('Token FCM registrado:', token)
+    if (!('serviceWorker' in navigator)) {
+      console.error('Service Worker no soportado')
+      return
     }
+
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') {
+      console.log('Permiso denegado')
+      return
+    }
+
+    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js')
+    console.log('Service Worker registrado:', registration.scope)
+
+    await navigator.serviceWorker.ready
+    console.log('Service Worker listo')
+
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+    })
+
+    await setDoc(doc(db, 'pushSubscriptions', uid), {
+      uid,
+      subscription: JSON.parse(JSON.stringify(subscription)),
+      updatedAt: new Date()
+    })
+
+    console.log('Suscripción push registrada ✅')
   } catch (err) {
-    console.error('Error registrando token FCM:', err)
+    console.error('Error registrando push:', err)
   }
 }
 
@@ -31,17 +58,7 @@ function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser)
-      if (currentUser) registrarToken(currentUser.uid)
-    })
-    return () => unsubscribe()
-  }, [])
-
-  useEffect(() => {
-    const unsubscribe = onMessage(messaging, (payload) => {
-      const { title, body } = payload.notification
-      if (Notification.permission === 'granted') {
-        new Notification(title, { body, icon: '/favicon.svg' })
-      }
+      if (currentUser) registrarPush(currentUser.uid)
     })
     return () => unsubscribe()
   }, [])
@@ -58,9 +75,7 @@ function App() {
     setLoading(false)
   }
 
-  const handleLogout = async () => {
-    await signOut(auth)
-  }
+  const handleLogout = async () => await signOut(auth)
 
   if (user) {
     return (
