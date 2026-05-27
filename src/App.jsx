@@ -1,6 +1,25 @@
 import { useState, useEffect } from 'react'
-import { auth } from './firebase'
+import { auth, messaging } from './firebase'
 import { signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth'
+import { getToken, onMessage } from 'firebase/messaging'
+import { getFirestore, doc, setDoc } from 'firebase/firestore'
+
+const db = getFirestore()
+const VAPID_KEY = 'BE6g5fMBBNjlX1SJX5x3v3NXNAJHbRMekYzcQlQQ-JFpC6uyzwCA_kaA_p7wW-jTyxAho-9ZWhCOm2jauh92yel'
+
+async function registrarToken(uid) {
+  try {
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') return
+    const token = await getToken(messaging, { vapidKey: VAPID_KEY })
+    if (token) {
+      await setDoc(doc(db, 'fcmTokens', uid), { token, uid, updatedAt: new Date() })
+      console.log('Token FCM registrado:', token)
+    }
+  } catch (err) {
+    console.error('Error registrando token FCM:', err)
+  }
+}
 
 function App() {
   const [email, setEmail] = useState('')
@@ -12,6 +31,17 @@ function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser)
+      if (currentUser) registrarToken(currentUser.uid)
+    })
+    return () => unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = onMessage(messaging, (payload) => {
+      const { title, body } = payload.notification
+      if (Notification.permission === 'granted') {
+        new Notification(title, { body, icon: '/favicon.svg' })
+      }
     })
     return () => unsubscribe()
   }, [])
@@ -36,6 +66,7 @@ function App() {
     return (
       <div style={{ padding: '20px', fontFamily: 'Arial' }}>
         <h2>Bienvenido, {user.email}</h2>
+        <p>Notificaciones: {Notification.permission}</p>
         <button onClick={handleLogout}>Cerrar sesión</button>
       </div>
     )
