@@ -56,9 +56,9 @@ function Login() {
         </div>
         <form onSubmit={handleLogin}>
           <input type="email" placeholder="Correo" value={email} onChange={e => setEmail(e.target.value)}
-            style={{ width:'100%', padding:'10px', marginBottom:'12px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box' }} />
+            style={{ width:'100%', padding:'10px', marginBottom:'12px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto }} />
           <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)}
-            style={{ width:'100%', padding:'10px', marginBottom:'12px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box' }} />
+            style={{ width:'100%', padding:'10px', marginBottom:'12px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto }} />
           {error && <p style={{ color: G.rojo, fontSize:'13px', marginBottom:'8px' }}>{error}</p>}
           <button type="submit" disabled={loading}
             style={{ width:'100%', padding:'12px', background: G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold' }}>
@@ -72,6 +72,7 @@ function Login() {
 
 function Catalogo() {
   const [productos, setProductos] = useState([])
+  const [tabGrupo, setTabGrupo] = useState('Con fermentación')
   const [nombre, setNombre] = useState('')
   const [medida, setMedida] = useState('')
   const [grupo, setGrupo] = useState('Con fermentación')
@@ -81,6 +82,7 @@ function Catalogo() {
   const [guardando, setGuardando] = useState(false)
   const [msg, setMsg] = useState('')
   const [editando, setEditando] = useState(null)
+  const [mostrarForm, setMostrarForm] = useState(false)
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'productos'), snap => {
@@ -112,158 +114,173 @@ function Catalogo() {
       setMsg('Producto guardado ✅')
     }
     setNombre(''); setMedida(''); setSubgrupo(''); setGrupo('Con fermentación')
-    setTimeout(() => setMsg(''), 3000)
+    setTimeout(() => { setMsg(''); setMostrarForm(false) }, 1500)
     setGuardando(false)
   }
 
   const iniciarEdicion = (p) => {
     setEditando(p); setNombre(p.nombre); setMedida(p.medida)
     setGrupo(p.grupo); setSubgrupo(p.subgrupo || '')
+    setMostrarForm(true)
     window.scrollTo(0, 0)
   }
 
   const cancelarEdicion = () => {
-    setEditando(null); setNombre(''); setMedida(''); setSubgrupo(''); setGrupo('Con fermentación')
+    setEditando(null); setNombre(''); setMedida(''); setSubgrupo('')
+    setGrupo('Con fermentación'); setMostrarForm(false)
   }
 
   const toggleActivo = async (p) => {
     await updateDoc(doc(db, 'productos', p.id), { activo: !p.activo })
   }
 
-  const activos = productos.filter(p => p.activo)
-  const inactivos = productos.filter(p => !p.activo)
+  const activos = productos.filter(p => p.activo && p.grupo === tabGrupo)
+  const inactivos = productos.filter(p => !p.activo && p.grupo === tabGrupo)
 
-  const porGrupo = (grp) => {
-    const prods = activos.filter(p => p.grupo === grp)
-    const subgrupos = [...new Set(prods.map(p => p.subgrupo || '—'))]
-    return subgrupos.map(sg => ({
-      subgrupo: sg,
-      productos: prods.filter(p => (p.subgrupo || '—') === sg)
-    }))
-  }
+  const subgruposActivos = [...new Set(activos.map(p => p.subgrupo || '—'))]
 
-  const ProductoCard = ({ p }) => (
-    <div style={{ background:'white', padding:'8px 10px', borderRadius:'8px', marginBottom:'5px', display:'flex', justifyContent:'space-between', alignItems:'center', boxShadow:'0 1px 3px rgba(0,0,0,0.05)' }}>
-      <div style={{ minWidth:0, flex:1, marginRight:'6px' }}>
-        <p style={{ margin:0, fontWeight:'bold', color: G.texto, fontSize:'13px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.nombre}</p>
-        <p style={{ margin:0, fontSize:'11px', color: G.gris }}>{p.medida}</p>
-      </div>
-      <div style={{ display:'flex', gap:'4px', flexShrink:0 }}>
-        <button onClick={() => iniciarEdicion(p)}
-          style={{ padding:'3px 7px', background:'#fef9c3', color:'#854d0e', border:'none', borderRadius:'5px', cursor:'pointer', fontSize:'11px' }}>✏️</button>
-        <button onClick={() => toggleActivo(p)}
-          style={{ padding:'3px 7px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'5px', cursor:'pointer', fontSize:'11px' }}>✕</button>
-      </div>
-    </div>
-  )
-
-  const GrupoColumna = ({ grp, emoji }) => {
-    const secciones = porGrupo(grp)
-    const total = secciones.reduce((acc, s) => acc + s.productos.length, 0)
-    return (
-      <div style={{ flex:1, minWidth:0 }}>
-        <p translate="no" style={{ fontWeight:'bold', color: G.cafe, marginBottom:'10px', fontSize:'14px', textAlign:'center' }}>
-          {emoji} {grp} ({total})
-        </p>
-        {secciones.length === 0 && (
-          <p style={{ textAlign:'center', color: G.gris, fontSize:'12px' }}>Sin productos</p>
-        )}
-        {secciones.map(({ subgrupo: sg, productos: prods }, idx) => (
-          <div key={sg}>
-            <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'5px', paddingLeft:'2px' }}>{sg}</p>
-            {prods.map(p => <ProductoCard key={p.id} p={p} />)}
-            {idx < secciones.length - 1 && (
-              <div style={{ height:'1px', background: G.borde, margin:'10px 0' }} />
-            )}
-          </div>
-        ))}
-      </div>
-    )
+  const inputStyle = {
+    width:'100%', padding:'10px', marginBottom:'10px', borderRadius:'8px',
+    border:`1px solid ${G.borde}`, boxSizing:'border-box',
+    background:'white', color: G.texto, fontSize:'15px'
   }
 
   return (
-    <div style={{ padding:'16px', maxWidth:'900px', margin:'0 auto' }}>
-      <h3 style={{ color: G.cafe, marginBottom:'16px' }}>📋 Catálogo de productos</h3>
+    <div style={{ maxWidth:'520px', margin:'0 auto' }}>
 
-      {/* Formulario */}
-      <div style={{ background:'white', padding:'16px', borderRadius:'10px', marginBottom:'20px', boxShadow:'0 1px 6px rgba(0,0,0,0.08)', borderTop: editando ? `3px solid #854d0e` : `3px solid ${G.cafe}` }}>
-        <p style={{ fontWeight:'bold', marginBottom:'12px', color: editando ? '#854d0e' : G.cafe }}>
-          {editando ? `✏️ Editando: ${editando.nombre}` : '➕ Agregar producto'}
-        </p>
-        <div style={{ display:'flex', gap:'8px', marginBottom:'10px' }}>
-          {['Con fermentación', 'Sin fermentación'].map(g => (
-            <button key={g} type="button" onClick={() => { setGrupo(g); setSubgrupo('') }}
-              style={{ flex:1, padding:'9px', borderRadius:'7px', border:`2px solid ${grupo === g ? G.cafe : G.borde}`, background: grupo === g ? G.cafe : 'white', color: grupo === g ? 'white' : G.gris, cursor:'pointer', fontSize:'13px', fontWeight: grupo === g ? 'bold' : 'normal' }}>
-              {g === 'Con fermentación' ? '🌾 Con ferm.' : '⚡ Sin ferm.'}
-            </button>
-          ))}
-        </div>
-        <div style={{ position:'relative', marginBottom:'10px' }}>
-          <input placeholder="Subgrupo (ej: Pan menudo, Semita pacha...)" value={subgrupo}
-            onChange={e => { setSubgrupo(e.target.value); setMostrarSug(true) }}
-            onFocus={() => setMostrarSug(true)}
-            onBlur={() => setTimeout(() => setMostrarSug(false), 150)}
-            autoCorrect="off" autoCapitalize="off" spellCheck="false"
-            style={{ width:'100%', padding:'9px', borderRadius:'7px', border:`1px solid ${G.borde}`, boxSizing:'border-box' }} />
-          {mostrarSug && sugerenciasFiltradas.length > 0 && (
-            <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:`1px solid ${G.borde}`, borderRadius:'7px', zIndex:50, boxShadow:'0 4px 12px rgba(0,0,0,0.1)' }}>
-              {sugerenciasFiltradas.map(s => (
-                <div key={s} onClick={() => { setSubgrupo(s); setMostrarSug(false) }}
-                  style={{ padding:'10px 12px', cursor:'pointer', fontSize:'14px', borderBottom:`1px solid ${G.borde}` }}
-                  onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
-                  onMouseLeave={e => e.currentTarget.style.background = 'white'}>
-                  {s}
-                </div>
+      {/* Tabs de grupo */}
+      <div style={{ display:'flex', borderBottom:`2px solid ${G.borde}`, background:'white', position:'sticky', top:'52px', zIndex:90 }}>
+        {['Con fermentación', 'Sin fermentación'].map(g => (
+          <button key={g} translate="no" onClick={() => setTabGrupo(g)}
+            style={{ flex:1, padding:'13px 8px', border:'none', background:'transparent',
+              color: tabGrupo === g ? G.cafe : G.gris,
+              fontWeight: tabGrupo === g ? 'bold' : 'normal',
+              borderBottom: tabGrupo === g ? `3px solid ${G.cafe}` : '3px solid transparent',
+              cursor:'pointer', fontSize:'14px', marginBottom:'-2px' }}>
+            {g === 'Con fermentación' ? '🌾 Con fermentación' : '⚡ Sin fermentación'}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ padding:'16px' }}>
+
+        {/* Botón agregar / formulario */}
+        {!mostrarForm ? (
+          <button onClick={() => { setGrupo(tabGrupo); setMostrarForm(true) }}
+            style={{ width:'100%', padding:'12px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px', marginBottom:'20px' }}>
+            ➕ Agregar producto
+          </button>
+        ) : (
+          <div style={{ background:'white', padding:'16px', borderRadius:'10px', marginBottom:'20px', boxShadow:'0 1px 6px rgba(0,0,0,0.08)', borderTop: editando ? `3px solid #854d0e` : `3px solid ${G.cafe}` }}>
+            <p style={{ fontWeight:'bold', marginBottom:'14px', color: editando ? '#854d0e' : G.cafe, fontSize:'15px' }}>
+              {editando ? `✏️ Editando: ${editando.nombre}` : '➕ Nuevo producto'}
+            </p>
+
+            {/* Selector de grupo */}
+            <div style={{ display:'flex', gap:'8px', marginBottom:'12px' }}>
+              {['Con fermentación', 'Sin fermentación'].map(g => (
+                <button key={g} type="button" translate="no" onClick={() => { setGrupo(g); setSubgrupo('') }}
+                  style={{ flex:1, padding:'9px', borderRadius:'8px',
+                    border:`2px solid ${grupo === g ? G.cafe : G.borde}`,
+                    background: grupo === g ? G.cafe : 'white',
+                    color: grupo === g ? 'white' : G.gris,
+                    cursor:'pointer', fontSize:'13px', fontWeight: grupo === g ? 'bold' : 'normal' }}>
+                  {g === 'Con fermentación' ? '🌾 Con ferm.' : '⚡ Sin ferm.'}
+                </button>
               ))}
             </div>
-          )}
-        </div>
-        <input placeholder="Nombre del producto" value={nombre} onChange={e => setNombre(e.target.value)}
-          autoCorrect="off" autoCapitalize="off" spellCheck="false"
-          style={{ width:'100%', padding:'9px', marginBottom:'10px', borderRadius:'7px', border:`1px solid ${G.borde}`, boxSizing:'border-box' }} />
-        <input placeholder="Medida / peso (ej: 1 lb, 500g, unidad)" value={medida} onChange={e => setMedida(e.target.value)}
-          autoCorrect="off" autoCapitalize="off" spellCheck="false"
-          style={{ width:'100%', padding:'9px', marginBottom:'12px', borderRadius:'7px', border:`1px solid ${G.borde}`, boxSizing:'border-box' }} />
-        {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize:'13px', marginBottom:'8px' }}>{msg}</p>}
-        <div style={{ display:'flex', gap:'8px' }}>
-          {editando && (
-            <button onClick={cancelarEdicion}
-              style={{ flex:1, padding:'10px', background: G.borde, color: G.texto, border:'none', borderRadius:'8px', cursor:'pointer' }}>Cancelar</button>
-          )}
-          <button onClick={guardar} disabled={guardando}
-            style={{ flex:1, padding:'10px', background: G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold' }}>
-            {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Agregar'}
-          </button>
-        </div>
-      </div>
 
-      {/* Dos columnas */}
-      <div style={{ display:'flex', gap:'12px', alignItems:'flex-start' }}>
-        <GrupoColumna grp="Con fermentación" emoji="🌾" />
-        <div style={{ width:'1px', background: G.borde, alignSelf:'stretch' }} />
-        <GrupoColumna grp="Sin fermentación" emoji="⚡" />
-      </div>
-
-      {/* Inactivos */}
-      {inactivos.length > 0 && (
-        <div style={{ marginTop:'24px' }}>
-          <p style={{ fontWeight:'bold', color: G.gris, marginBottom:'8px' }}>Inactivos ({inactivos.length})</p>
-          {inactivos.map(p => (
-            <div key={p.id} style={{ background:'#f9f9f9', padding:'10px 14px', borderRadius:'8px', marginBottom:'6px', display:'flex', justifyContent:'space-between', alignItems:'center', opacity:0.6 }}>
-              <div>
-                <p style={{ margin:0, fontWeight:'bold', fontSize:'14px' }}>{p.nombre}</p>
-                <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{p.medida} · {p.subgrupo} · {p.grupo}</p>
-              </div>
-              <button onClick={() => toggleActivo(p)}
-                style={{ padding:'4px 10px', background:'#dcfce7', color: G.verde, border:'none', borderRadius:'6px', cursor:'pointer', fontSize:'12px' }}>Activar</button>
+            {/* Subgrupo */}
+            <div style={{ position:'relative', marginBottom:'10px' }}>
+              <input placeholder="Subgrupo (ej: Pan menudo, Semita pacha...)" value={subgrupo}
+                onChange={e => { setSubgrupo(e.target.value); setMostrarSug(true) }}
+                onFocus={() => setMostrarSug(true)}
+                onBlur={() => setTimeout(() => setMostrarSug(false), 150)}
+                autoCorrect="off" autoCapitalize="off" spellCheck="false"
+                style={inputStyle} />
+              {mostrarSug && sugerenciasFiltradas.length > 0 && (
+                <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:`1px solid ${G.borde}`, borderRadius:'8px', zIndex:50, boxShadow:'0 4px 12px rgba(0,0,0,0.12)' }}>
+                  {sugerenciasFiltradas.map(s => (
+                    <div key={s} onClick={() => { setSubgrupo(s); setMostrarSug(false) }}
+                      style={{ padding:'11px 14px', cursor:'pointer', fontSize:'14px', borderBottom:`1px solid ${G.borde}` }}
+                      onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
+                      onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                      {s}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          ))}
-        </div>
-      )}
 
-      {activos.length === 0 && (
-        <p style={{ textAlign:'center', color: G.gris, marginTop:'32px' }}>No hay productos aún. ¡Agregá el primero!</p>
-      )}
+            <input placeholder="Nombre del producto" value={nombre} onChange={e => setNombre(e.target.value)}
+              autoCorrect="off" autoCapitalize="off" spellCheck="false" style={inputStyle} />
+            <input placeholder="Medida / peso (ej: 1 lb, 500g, unidad)" value={medida} onChange={e => setMedida(e.target.value)}
+              autoCorrect="off" autoCapitalize="off" spellCheck="false" style={{ ...inputStyle, marginBottom:'14px' }} />
+
+            {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize:'13px', marginBottom:'10px' }}>{msg}</p>}
+
+            <div style={{ display:'flex', gap:'8px' }}>
+              <button onClick={cancelarEdicion}
+                style={{ flex:1, padding:'11px', background: G.borde, color: G.texto, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'14px' }}>
+                Cancelar
+              </button>
+              <button onClick={guardar} disabled={guardando}
+                style={{ flex:2, padding:'11px', background: G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold', fontSize:'14px' }}>
+                {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Agregar'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Lista de productos activos por subgrupo */}
+        {subgruposActivos.map((sg, idx) => (
+          <div key={sg} style={{ marginBottom:'20px' }}>
+            <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px', paddingLeft:'2px' }}>{sg}</p>
+            {activos.filter(p => (p.subgrupo || '—') === sg).map(p => (
+              <div key={p.id} style={{ background:'white', padding:'12px 14px', borderRadius:'10px', marginBottom:'8px', display:'flex', justifyContent:'space-between', alignItems:'center', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+                <div style={{ flex:1, marginRight:'10px' }}>
+                  <p style={{ margin:0, fontWeight:'bold', color: G.texto, fontSize:'15px' }}>{p.nombre}</p>
+                  <p style={{ margin:0, fontSize:'12px', color: G.gris, marginTop:'2px' }}>{p.medida}</p>
+                </div>
+                <div style={{ display:'flex', gap:'6px' }}>
+                  <button onClick={() => iniciarEdicion(p)}
+                    style={{ padding:'7px 12px', background:'#fef9c3', color:'#854d0e', border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✏️</button>
+                  <button onClick={() => toggleActivo(p)}
+                    style={{ padding:'7px 12px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✕</button>
+                </div>
+              </div>
+            ))}
+            {idx < subgruposActivos.length - 1 && (
+              <div style={{ height:'1px', background: G.borde, margin:'4px 0 20px' }} />
+            )}
+          </div>
+        ))}
+
+        {activos.length === 0 && !mostrarForm && (
+          <p style={{ textAlign:'center', color: G.gris, marginTop:'40px', fontSize:'14px' }}>
+            No hay productos en este grupo aún.
+          </p>
+        )}
+
+        {/* Inactivos */}
+        {inactivos.length > 0 && (
+          <div style={{ marginTop:'24px', opacity:0.65 }}>
+            <p style={{ fontWeight:'bold', color: G.gris, marginBottom:'10px', fontSize:'13px' }}>INACTIVOS ({inactivos.length})</p>
+            {inactivos.map(p => (
+              <div key={p.id} style={{ background:'#f9f9f9', padding:'11px 14px', borderRadius:'10px', marginBottom:'7px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <div>
+                  <p style={{ margin:0, fontWeight:'bold', fontSize:'14px' }}>{p.nombre}</p>
+                  <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{p.medida} · {p.subgrupo}</p>
+                </div>
+                <button onClick={() => toggleActivo(p)}
+                  style={{ padding:'6px 12px', background:'#dcfce7', color: G.verde, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'12px' }}>
+                  Activar
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -295,10 +312,12 @@ function App() {
             style={{ background:'rgba(255,255,255,0.2)', color:'white', border:'none', padding:'6px 12px', borderRadius:'6px', cursor:'pointer', fontSize:'13px' }}>Salir</button>
         </div>
       </div>
+
       <div>
         {tab === 'catalogo' && isAdmin && <Catalogo />}
         {!isAdmin && <p style={{ textAlign:'center', color: G.gris, marginTop:'40px' }}>Módulos en construcción...</p>}
       </div>
+
       {tabs.length > 0 && (
         <div style={{ position:'fixed', bottom:0, left:0, right:0, background:'white', borderTop:`1px solid ${G.borde}`, display:'flex' }}>
           {tabs.map(t => (
