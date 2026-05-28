@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { auth, db } from './firebase'
 import { signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth'
-import { doc, setDoc } from 'firebase/firestore'
+import { doc, setDoc, collection, onSnapshot, updateDoc } from 'firebase/firestore'
 
 const VAPID_PUBLIC_KEY = 'BOAhRPgcEJBXM_KsBk9TfegDoZBNPCLD6wdLT8d004bgHMdv7vJQ-nNepGusUZzWheRmq-bzG2mc6su8bawV8FM'
+const ADMINS = ['migueljmolina79@gmail.com']
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4)
@@ -14,108 +15,300 @@ function urlBase64ToUint8Array(base64String) {
 
 async function registrarPush(uid) {
   try {
-    if (!('serviceWorker' in navigator)) {
-      console.error('Service Worker no soportado')
-      return
-    }
-
     const permission = await Notification.requestPermission()
-    if (permission !== 'granted') {
-      console.log('Permiso denegado')
-      return
-    }
-
+    if (permission !== 'granted') return
     const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js')
-    console.log('Service Worker registrado:', registration.scope)
-
     await navigator.serviceWorker.ready
-    console.log('Service Worker listo')
-
     const subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
     })
-
     await setDoc(doc(db, 'pushSubscriptions', uid), {
-      uid,
-      subscription: JSON.parse(JSON.stringify(subscription)),
-      updatedAt: new Date()
+      uid, subscription: JSON.parse(JSON.stringify(subscription)), updatedAt: new Date()
     })
-
-    console.log('Suscripción push registrada ✅')
-  } catch (err) {
-    console.error('Error registrando push:', err)
-  }
+  } catch (err) { console.error('Error push:', err) }
 }
 
-function App() {
+const G = {
+  cafe: '#8B6B3E', cafeClaro: '#f5f0eb', texto: '#333',
+  gris: '#888', verde: '#16a34a', rojo: '#dc2626', borde: '#e5e7eb'
+}
+
+function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [user, setUser] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser)
-      if (currentUser) registrarPush(currentUser.uid)
-    })
-    return () => unsubscribe()
-  }, [])
-
   const handleLogin = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
-    try {
-      await signInWithEmailAndPassword(auth, email, password)
-    } catch (err) {
-      setError('Usuario o contraseña incorrectos')
-    }
+    e.preventDefault(); setLoading(true); setError('')
+    try { await signInWithEmailAndPassword(auth, email, password) }
+    catch { setError('Usuario o contraseña incorrectos') }
     setLoading(false)
   }
 
-  const handleLogout = async () => await signOut(auth)
+  return (
+    <div style={{ display:'flex', justifyContent:'center', alignItems:'center', height:'100vh', background: G.cafeClaro }}>
+      <div style={{ width:'300px', background:'white', padding:'32px', borderRadius:'12px', boxShadow:'0 2px 12px rgba(0,0,0,0.1)' }}>
+        <div style={{ textAlign:'center', marginBottom:'24px' }}>
+          <div style={{ fontSize:'40px' }}>🍞</div>
+          <h2 style={{ color: G.cafe, margin:'8px 0 0' }}>El Bambú</h2>
+        </div>
+        <form onSubmit={handleLogin}>
+          <input type="email" placeholder="Correo" value={email} onChange={e => setEmail(e.target.value)}
+            style={{ width:'100%', padding:'10px', marginBottom:'12px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box' }} />
+          <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)}
+            style={{ width:'100%', padding:'10px', marginBottom:'12px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box' }} />
+          {error && <p style={{ color: G.rojo, fontSize:'13px', marginBottom:'8px' }}>{error}</p>}
+          <button type="submit" disabled={loading}
+            style={{ width:'100%', padding:'12px', background: G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold' }}>
+            {loading ? 'Ingresando...' : 'Ingresar'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
 
-  if (user) {
+function Catalogo() {
+  const [productos, setProductos] = useState([])
+  const [nombre, setNombre] = useState('')
+  const [medida, setMedida] = useState('')
+  const [grupo, setGrupo] = useState('Con fermentación')
+  const [subgrupo, setSubgrupo] = useState('')
+  const [sugerencias, setSugerencias] = useState([])
+  const [mostrarSug, setMostrarSug] = useState(false)
+  const [guardando, setGuardando] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [editando, setEditando] = useState(null)
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'productos'), snap => {
+      const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      lista.sort((a, b) => a.grupo.localeCompare(b.grupo) || (a.subgrupo||'').localeCompare(b.subgrupo||'') || a.nombre.localeCompare(b.nombre))
+      setProductos(lista)
+    })
+    return () => unsub()
+  }, [])
+
+  useEffect(() => {
+    const subs = [...new Set(productos.filter(p => p.grupo === grupo && p.subgrupo).map(p => p.subgrupo))]
+    setSugerencias(subs)
+  }, [grupo, productos])
+
+  const sugerenciasFiltradas = sugerencias.filter(s =>
+    subgrupo === '' || s.toLowerCase().includes(subgrupo.toLowerCase())
+  )
+
+  const guardar = async () => {
+    if (!nombre.trim() || !medida.trim()) { setMsg('⚠️ Completá nombre y medida'); return }
+    setGuardando(true)
+    const datos = { nombre: nombre.trim(), medida: medida.trim(), grupo, subgrupo: subgrupo.trim(), activo: true }
+    if (editando) {
+      await updateDoc(doc(db, 'productos', editando.id), datos)
+      setEditando(null); setMsg('Producto actualizado ✅')
+    } else {
+      await setDoc(doc(db, 'productos', Date.now().toString()), { ...datos, creadoEn: new Date() })
+      setMsg('Producto guardado ✅')
+    }
+    setNombre(''); setMedida(''); setSubgrupo(''); setGrupo('Con fermentación')
+    setTimeout(() => setMsg(''), 3000)
+    setGuardando(false)
+  }
+
+  const iniciarEdicion = (p) => {
+    setEditando(p); setNombre(p.nombre); setMedida(p.medida)
+    setGrupo(p.grupo); setSubgrupo(p.subgrupo || '')
+    window.scrollTo(0, 0)
+  }
+
+  const cancelarEdicion = () => {
+    setEditando(null); setNombre(''); setMedida(''); setSubgrupo(''); setGrupo('Con fermentación')
+  }
+
+  const toggleActivo = async (p) => {
+    await updateDoc(doc(db, 'productos', p.id), { activo: !p.activo })
+  }
+
+  const activos = productos.filter(p => p.activo)
+  const inactivos = productos.filter(p => !p.activo)
+
+  const porGrupo = (grp) => {
+    const prods = activos.filter(p => p.grupo === grp)
+    const subgrupos = [...new Set(prods.map(p => p.subgrupo || '—'))]
+    return subgrupos.map(sg => ({
+      subgrupo: sg,
+      productos: prods.filter(p => (p.subgrupo || '—') === sg)
+    }))
+  }
+
+  const ProductoCard = ({ p }) => (
+    <div style={{ background:'white', padding:'8px 10px', borderRadius:'8px', marginBottom:'5px', display:'flex', justifyContent:'space-between', alignItems:'center', boxShadow:'0 1px 3px rgba(0,0,0,0.05)' }}>
+      <div style={{ minWidth:0, flex:1, marginRight:'6px' }}>
+        <p style={{ margin:0, fontWeight:'bold', color: G.texto, fontSize:'13px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.nombre}</p>
+        <p style={{ margin:0, fontSize:'11px', color: G.gris }}>{p.medida}</p>
+      </div>
+      <div style={{ display:'flex', gap:'4px', flexShrink:0 }}>
+        <button onClick={() => iniciarEdicion(p)}
+          style={{ padding:'3px 7px', background:'#fef9c3', color:'#854d0e', border:'none', borderRadius:'5px', cursor:'pointer', fontSize:'11px' }}>✏️</button>
+        <button onClick={() => toggleActivo(p)}
+          style={{ padding:'3px 7px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'5px', cursor:'pointer', fontSize:'11px' }}>✕</button>
+      </div>
+    </div>
+  )
+
+  const GrupoColumna = ({ grp, emoji }) => {
+    const secciones = porGrupo(grp)
+    const total = secciones.reduce((acc, s) => acc + s.productos.length, 0)
     return (
-      <div style={{ padding: '20px', fontFamily: 'Arial' }}>
-        <h2>Bienvenido, {user.email}</h2>
-        <p>Notificaciones: {Notification.permission}</p>
-        <button onClick={handleLogout}>Cerrar sesión</button>
+      <div style={{ flex:1, minWidth:0 }}>
+        <p translate="no" style={{ fontWeight:'bold', color: G.cafe, marginBottom:'10px', fontSize:'14px', textAlign:'center' }}>
+          {emoji} {grp} ({total})
+        </p>
+        {secciones.length === 0 && (
+          <p style={{ textAlign:'center', color: G.gris, fontSize:'12px' }}>Sin productos</p>
+        )}
+        {secciones.map(({ subgrupo: sg, productos: prods }, idx) => (
+          <div key={sg}>
+            <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'5px', paddingLeft:'2px' }}>{sg}</p>
+            {prods.map(p => <ProductoCard key={p.id} p={p} />)}
+            {idx < secciones.length - 1 && (
+              <div style={{ height:'1px', background: G.borde, margin:'10px 0' }} />
+            )}
+          </div>
+        ))}
       </div>
     )
   }
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontFamily: 'Arial' }}>
-      <div style={{ width: '300px' }}>
-        <h2 style={{ textAlign: 'center' }}>El Bambú</h2>
-        <form onSubmit={handleLogin}>
-          <div style={{ marginBottom: '10px' }}>
-            <input
-              type="email"
-              placeholder="Correo"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-            />
-          </div>
-          <div style={{ marginBottom: '10px' }}>
-            <input
-              type="password"
-              placeholder="Contraseña"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-            />
-          </div>
-          {error && <p style={{ color: 'red', fontSize: '14px' }}>{error}</p>}
-          <button type="submit" disabled={loading} style={{ width: '100%', padding: '10px', background: '#8B6B3E', color: 'white', border: 'none', cursor: 'pointer' }}>
-            {loading ? 'Ingresando...' : 'Ingresar'}
+    <div style={{ padding:'16px', maxWidth:'900px', margin:'0 auto' }}>
+      <h3 style={{ color: G.cafe, marginBottom:'16px' }}>📋 Catálogo de productos</h3>
+
+      {/* Formulario */}
+      <div style={{ background:'white', padding:'16px', borderRadius:'10px', marginBottom:'20px', boxShadow:'0 1px 6px rgba(0,0,0,0.08)', borderTop: editando ? `3px solid #854d0e` : `3px solid ${G.cafe}` }}>
+        <p style={{ fontWeight:'bold', marginBottom:'12px', color: editando ? '#854d0e' : G.cafe }}>
+          {editando ? `✏️ Editando: ${editando.nombre}` : '➕ Agregar producto'}
+        </p>
+        <div style={{ display:'flex', gap:'8px', marginBottom:'10px' }}>
+          {['Con fermentación', 'Sin fermentación'].map(g => (
+            <button key={g} type="button" onClick={() => { setGrupo(g); setSubgrupo('') }}
+              style={{ flex:1, padding:'9px', borderRadius:'7px', border:`2px solid ${grupo === g ? G.cafe : G.borde}`, background: grupo === g ? G.cafe : 'white', color: grupo === g ? 'white' : G.gris, cursor:'pointer', fontSize:'13px', fontWeight: grupo === g ? 'bold' : 'normal' }}>
+              {g === 'Con fermentación' ? '🌾 Con ferm.' : '⚡ Sin ferm.'}
+            </button>
+          ))}
+        </div>
+        <div style={{ position:'relative', marginBottom:'10px' }}>
+          <input placeholder="Subgrupo (ej: Pan menudo, Semita pacha...)" value={subgrupo}
+            onChange={e => { setSubgrupo(e.target.value); setMostrarSug(true) }}
+            onFocus={() => setMostrarSug(true)}
+            onBlur={() => setTimeout(() => setMostrarSug(false), 150)}
+            autoCorrect="off" autoCapitalize="off" spellCheck="false"
+            style={{ width:'100%', padding:'9px', borderRadius:'7px', border:`1px solid ${G.borde}`, boxSizing:'border-box' }} />
+          {mostrarSug && sugerenciasFiltradas.length > 0 && (
+            <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:`1px solid ${G.borde}`, borderRadius:'7px', zIndex:50, boxShadow:'0 4px 12px rgba(0,0,0,0.1)' }}>
+              {sugerenciasFiltradas.map(s => (
+                <div key={s} onClick={() => { setSubgrupo(s); setMostrarSug(false) }}
+                  style={{ padding:'10px 12px', cursor:'pointer', fontSize:'14px', borderBottom:`1px solid ${G.borde}` }}
+                  onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
+                  onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                  {s}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <input placeholder="Nombre del producto" value={nombre} onChange={e => setNombre(e.target.value)}
+          autoCorrect="off" autoCapitalize="off" spellCheck="false"
+          style={{ width:'100%', padding:'9px', marginBottom:'10px', borderRadius:'7px', border:`1px solid ${G.borde}`, boxSizing:'border-box' }} />
+        <input placeholder="Medida / peso (ej: 1 lb, 500g, unidad)" value={medida} onChange={e => setMedida(e.target.value)}
+          autoCorrect="off" autoCapitalize="off" spellCheck="false"
+          style={{ width:'100%', padding:'9px', marginBottom:'12px', borderRadius:'7px', border:`1px solid ${G.borde}`, boxSizing:'border-box' }} />
+        {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize:'13px', marginBottom:'8px' }}>{msg}</p>}
+        <div style={{ display:'flex', gap:'8px' }}>
+          {editando && (
+            <button onClick={cancelarEdicion}
+              style={{ flex:1, padding:'10px', background: G.borde, color: G.texto, border:'none', borderRadius:'8px', cursor:'pointer' }}>Cancelar</button>
+          )}
+          <button onClick={guardar} disabled={guardando}
+            style={{ flex:1, padding:'10px', background: G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold' }}>
+            {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Agregar'}
           </button>
-        </form>
+        </div>
       </div>
+
+      {/* Dos columnas */}
+      <div style={{ display:'flex', gap:'12px', alignItems:'flex-start' }}>
+        <GrupoColumna grp="Con fermentación" emoji="🌾" />
+        <div style={{ width:'1px', background: G.borde, alignSelf:'stretch' }} />
+        <GrupoColumna grp="Sin fermentación" emoji="⚡" />
+      </div>
+
+      {/* Inactivos */}
+      {inactivos.length > 0 && (
+        <div style={{ marginTop:'24px' }}>
+          <p style={{ fontWeight:'bold', color: G.gris, marginBottom:'8px' }}>Inactivos ({inactivos.length})</p>
+          {inactivos.map(p => (
+            <div key={p.id} style={{ background:'#f9f9f9', padding:'10px 14px', borderRadius:'8px', marginBottom:'6px', display:'flex', justifyContent:'space-between', alignItems:'center', opacity:0.6 }}>
+              <div>
+                <p style={{ margin:0, fontWeight:'bold', fontSize:'14px' }}>{p.nombre}</p>
+                <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{p.medida} · {p.subgrupo} · {p.grupo}</p>
+              </div>
+              <button onClick={() => toggleActivo(p)}
+                style={{ padding:'4px 10px', background:'#dcfce7', color: G.verde, border:'none', borderRadius:'6px', cursor:'pointer', fontSize:'12px' }}>Activar</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activos.length === 0 && (
+        <p style={{ textAlign:'center', color: G.gris, marginTop:'32px' }}>No hay productos aún. ¡Agregá el primero!</p>
+      )}
+    </div>
+  )
+}
+
+function App() {
+  const [user, setUser] = useState(null)
+  const [tab, setTab] = useState('catalogo')
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, currentUser => {
+      setUser(currentUser)
+      if (currentUser) registrarPush(currentUser.uid)
+    })
+    return () => unsub()
+  }, [])
+
+  if (!user) return <Login />
+
+  const isAdmin = ADMINS.includes(user.email)
+  const tabs = [...(isAdmin ? [{ key:'catalogo', label:'📋 Catálogo' }] : [])]
+
+  return (
+    <div style={{ minHeight:'100vh', background: G.cafeClaro, paddingBottom:'70px' }}>
+      <div style={{ background: G.cafe, color:'white', padding:'14px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', position:'sticky', top:0, zIndex:100 }}>
+        <span style={{ fontWeight:'bold', fontSize:'18px' }}>🍞 El Bambú</span>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+          <span style={{ fontSize:'13px', opacity:0.8 }}>{user.email.split('@')[0]}</span>
+          <button onClick={() => signOut(auth)}
+            style={{ background:'rgba(255,255,255,0.2)', color:'white', border:'none', padding:'6px 12px', borderRadius:'6px', cursor:'pointer', fontSize:'13px' }}>Salir</button>
+        </div>
+      </div>
+      <div>
+        {tab === 'catalogo' && isAdmin && <Catalogo />}
+        {!isAdmin && <p style={{ textAlign:'center', color: G.gris, marginTop:'40px' }}>Módulos en construcción...</p>}
+      </div>
+      {tabs.length > 0 && (
+        <div style={{ position:'fixed', bottom:0, left:0, right:0, background:'white', borderTop:`1px solid ${G.borde}`, display:'flex' }}>
+          {tabs.map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              style={{ flex:1, padding:'12px 8px', border:'none', background: tab === t.key ? G.cafeClaro : 'white', color: tab === t.key ? G.cafe : G.gris, fontWeight: tab === t.key ? 'bold' : 'normal', cursor:'pointer', fontSize:'12px' }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
