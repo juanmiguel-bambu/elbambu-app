@@ -6,6 +6,7 @@ import Login from './components/Login'
 import Catalogo from './components/Catalogo'
 import NuevoPedido from './components/NuevoPedido'
 import MisPedidos from './components/MisPedidos'
+import Consolidado from './components/Consolidado'
 import { VAPID_PUBLIC_KEY, ADMINS, G } from './components/constants'
 
 function urlBase64ToUint8Array(base64String) {
@@ -50,6 +51,7 @@ export default function App() {
   const tabs = [
     { key:'nuevo-pedido', label:'➕ Pedido' },
     { key:'mis-pedidos', label:'📦 Mis pedidos' },
+    { key:'consolidado', label:'📊 Consolidado' },
     ...(isAdmin ? [{ key:'catalogo', label:'📋 Catálogo' }] : []),
   ]
 
@@ -65,13 +67,14 @@ export default function App() {
       <div>
         {tab === 'nuevo-pedido' && <NuevoPedido user={user} />}
         {tab === 'mis-pedidos' && <MisPedidos user={user} />}
+        {tab === 'consolidado' && <Consolidado />}
         {tab === 'catalogo' && isAdmin && <Catalogo />}
         {tab === 'catalogo' && !isAdmin && <p style={{ textAlign:'center', color: G.gris, marginTop:'40px' }}>Sin acceso.</p>}
       </div>
       <div style={{ position:'fixed', bottom:0, left:0, right:0, background:'white', borderTop:`1px solid ${G.borde}`, display:'flex' }}>
         {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            style={{ flex:1, padding:'12px 8px', border:'none', background: tab === t.key ? G.cafeClaro : 'white', color: tab === t.key ? G.cafe : G.gris, fontWeight: tab === t.key ? 'bold' : 'normal', cursor:'pointer', fontSize:'12px' }}>
+            style={{ flex:1, padding:'12px 4px', border:'none', background: tab === t.key ? G.cafeClaro : 'white', color: tab === t.key ? G.cafe : G.gris, fontWeight: tab === t.key ? 'bold' : 'normal', cursor:'pointer', fontSize:'11px' }}>
             {t.label}
           </button>
         ))}

@@ -1,0 +1,172 @@
+import { useState, useEffect } from 'react'
+import { db } from '../firebase'
+import { collection, getDocs, query, where } from 'firebase/firestore'
+import { G } from './constants'
+
+export default function Consolidado() {
+  const [grupos, setGrupos] = useState([])
+  const [tabGrupo, setTabGrupo] = useState(null)
+  const [fecha, setFecha] = useState('')
+  const [consolidado, setConsolidado] = useState([])
+  const [cargando, setCargando] = useState(false)
+  const [detalleAbierto, setDetalleAbierto] = useState(null)
+
+  useEffect(() => {
+    const hoy = new Date()
+    const f = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`
+    setFecha(f)
+  }, [])
+
+  useEffect(() => {
+    const unsub_grupos = async () => {
+      const snap = await getDocs(collection(db, 'grupos'))
+      const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      lista.sort((a, b) => (a.orden || 0) - (b.orden || 0))
+      setGrupos(lista)
+      if (lista.length > 0) setTabGrupo(lista[0].id)
+    }
+    unsub_grupos()
+  }, [])
+
+  useEffect(() => {
+    if (!fecha || !tabGrupo) return
+    cargarConsolidado()
+  }, [fecha, tabGrupo])
+
+  const cargarConsolidado = async () => {
+    setCargando(true)
+    setDetalleAbierto(null)
+    try {
+      const snap = await getDocs(query(
+        collection(db, 'pedidos'),
+        where('fechaEntrega', '==', fecha)
+      ))
+      const pedidos = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+
+      // Agrupar por producto dentro del grupo activo
+      const mapa = {}
+      pedidos.forEach(pedido => {
+        pedido.items?.forEach(item => {
+          if (item.grupoId !== tabGrupo) return
+          if (!mapa[item.productoId]) {
+            mapa[item.productoId] = {
+              nombre: item.nombre,
+              medida: item.medida,
+              total: 0,
+              detalle: []
+            }
+          }
+          mapa[item.productoId].total += Number(item.cantidad)
+          mapa[item.productoId].detalle.push({
+            vendedor: pedido.vendedorNombre || pedido.vendedor,
+            cantidad: Number(item.cantidad),
+            entrega: pedido.entrega,
+            pago: pedido.pago
+          })
+        })
+      })
+
+      const lista = Object.values(mapa).sort((a, b) => a.nombre.localeCompare(b.nombre))
+      setConsolidado(lista)
+    } catch (e) {
+      console.error(e)
+    }
+    setCargando(false)
+  }
+
+  const totalGeneral = consolidado.reduce((acc, p) => acc + p.total, 0)
+
+  // Fecha mínima: 30 días atrás
+  const hoy = new Date()
+  const hace30 = new Date(hoy)
+  hace30.setDate(hoy.getDate() - 30)
+  const minFecha = `${hace30.getFullYear()}-${String(hace30.getMonth()+1).padStart(2,'0')}-${String(hace30.getDate()).padStart(2,'0')}`
+  const maxFecha = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`
+
+  return (
+    <div style={{ maxWidth:'520px', margin:'0 auto' }}>
+
+      {/* Tabs de grupos */}
+      <div style={{ background:'white', position:'sticky', top:'52px', zIndex:90, borderBottom:`1px solid ${G.borde}` }}>
+        <div style={{ display:'flex', overflowX:'auto', scrollbarWidth:'none' }}>
+          {grupos.map(g => (
+            <button key={g.id} translate="no" onClick={() => setTabGrupo(g.id)}
+              style={{ flexShrink:0, padding:'13px 16px', border:'none', background:'transparent',
+                color: tabGrupo === g.id ? G.cafe : G.gris,
+                fontWeight: tabGrupo === g.id ? 'bold' : 'normal',
+                borderBottom: tabGrupo === g.id ? `3px solid ${G.cafe}` : '3px solid transparent',
+                cursor:'pointer', fontSize:'14px', whiteSpace:'nowrap' }}>
+              {g.nombre}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding:'16px' }}>
+
+        {/* Selector de fecha */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
+          <h3 style={{ color: G.cafe, margin:0 }}>📊 Consolidado</h3>
+          <input type="date" value={fecha} min={minFecha} max={maxFecha}
+            onChange={e => setFecha(e.target.value)}
+            style={{ padding:'8px 10px', borderRadius:'8px', border:`1px solid ${G.borde}`, background:'white', color: G.texto, fontSize:'14px' }} />
+        </div>
+
+        {/* Resumen */}
+        {!cargando && consolidado.length > 0 && (
+          <div style={{ background: G.cafe, color:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'20px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <span style={{ fontSize:'14px' }}>{consolidado.length} producto{consolidado.length !== 1 ? 's' : ''}</span>
+            <span style={{ fontWeight:'bold', fontSize:'18px' }}>{totalGeneral} uds total</span>
+          </div>
+        )}
+
+        {cargando && <p style={{ textAlign:'center', color: G.gris, marginTop:'40px' }}>Cargando...</p>}
+
+        {!cargando && consolidado.length === 0 && (
+          <p style={{ textAlign:'center', color: G.gris, marginTop:'40px', fontSize:'14px' }}>
+            No hay pedidos para esta fecha y grupo.
+          </p>
+        )}
+
+        {/* Lista consolidada */}
+        {consolidado.map((prod, idx) => (
+          <div key={idx} style={{ background:'white', borderRadius:'10px', marginBottom:'10px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', overflow:'hidden' }}>
+            <div style={{ padding:'14px 16px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div style={{ flex:1 }}>
+                <p style={{ margin:0, fontWeight:'bold', fontSize:'15px', color: G.texto }}>{prod.nombre}</p>
+                <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>{prod.medida}</p>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
+                <span style={{ fontWeight:'bold', fontSize:'20px', color: G.cafe }}>{prod.total}</span>
+                <button onClick={() => setDetalleAbierto(detalleAbierto === idx ? null : idx)}
+                  style={{ background:'none', border:'none', cursor:'pointer', fontSize:'18px', color: G.gris, padding:'4px 6px', lineHeight:1 }}>
+                  ⋮
+                </button>
+              </div>
+            </div>
+
+            {/* Detalle desplegable */}
+            {detalleAbierto === idx && (
+              <div style={{ borderTop:`1px solid ${G.borde}`, padding:'12px 16px', background:'#fafafa' }}>
+                <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>
+                  Detalle por vendedor
+                </p>
+                {prod.detalle.map((d, i) => (
+                  <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 0', borderBottom: i < prod.detalle.length - 1 ? `1px solid ${G.borde}` : 'none' }}>
+                    <div>
+                      <p style={{ margin:0, fontSize:'14px', fontWeight:'bold', color: G.texto }}>{d.vendedor}</p>
+                      <p style={{ margin:0, fontSize:'11px', color: G.gris }}>
+                        {d.entrega === 'panaderia' ? '🏠 Panadería' : '🚚 Ruta'} · {d.pago === 'pagado' ? '✅ Pagado' : '⏳ Pendiente'}
+                      </p>
+                    </div>
+                    <span style={{ fontWeight:'bold', fontSize:'16px', color: G.cafe }}>{d.cantidad}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
