@@ -70,7 +70,6 @@ function Login() {
   )
 }
 
-// ─── GESTIÓN DE GRUPOS ────────────────────────────────────────
 function GestionGrupos({ onVolver }) {
   const [grupos, setGrupos] = useState([])
   const [nombre, setNombre] = useState('')
@@ -93,15 +92,11 @@ function GestionGrupos({ onVolver }) {
     if (!nombre.trim()) { setMsg('⚠️ Escribí el nombre del grupo'); return }
     setGuardando(true)
     if (editando) {
-      await updateDoc(doc(db, 'grupos', editando.id), {
-        nombre: nombre.trim(), horario: horario.trim()
-      })
+      await updateDoc(doc(db, 'grupos', editando.id), { nombre: nombre.trim(), horario: horario.trim() })
       setEditando(null); setMsg('Grupo actualizado ✅')
     } else {
-      const id = Date.now().toString()
-      await setDoc(doc(db, 'grupos', id), {
-        nombre: nombre.trim(), horario: horario.trim(),
-        orden: grupos.length, creadoEn: new Date()
+      await setDoc(doc(db, 'grupos', Date.now().toString()), {
+        nombre: nombre.trim(), horario: horario.trim(), orden: grupos.length, creadoEn: new Date()
       })
       setMsg('Grupo creado ✅')
     }
@@ -115,9 +110,7 @@ function GestionGrupos({ onVolver }) {
     window.scrollTo(0, 0)
   }
 
-  const cancelar = () => {
-    setEditando(null); setNombre(''); setHorario('')
-  }
+  const cancelar = () => { setEditando(null); setNombre(''); setHorario('') }
 
   const eliminar = async (g) => {
     await deleteDoc(doc(db, 'grupos', g.id))
@@ -128,31 +121,25 @@ function GestionGrupos({ onVolver }) {
 
   const inputStyle = {
     width:'100%', padding:'10px', marginBottom:'10px', borderRadius:'8px',
-    border:`1px solid ${G.borde}`, boxSizing:'border-box',
-    background:'white', color: G.texto, fontSize:'15px'
+    border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto, fontSize:'15px'
   }
 
   return (
     <div style={{ maxWidth:'520px', margin:'0 auto', padding:'16px' }}>
       <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'20px' }}>
-        <button onClick={onVolver}
-          style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color: G.cafe }}>←</button>
+        <button onClick={onVolver} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color: G.cafe }}>←</button>
         <h3 style={{ margin:0, color: G.cafe }}>Gestión de grupos</h3>
       </div>
 
-      {/* Formulario */}
       <div style={{ background:'white', padding:'16px', borderRadius:'10px', marginBottom:'20px', boxShadow:'0 1px 6px rgba(0,0,0,0.08)', borderTop: editando ? `3px solid #854d0e` : `3px solid ${G.cafe}` }}>
         <p style={{ fontWeight:'bold', marginBottom:'14px', color: editando ? '#854d0e' : G.cafe }}>
           {editando ? `✏️ Editando: ${editando.nombre}` : '➕ Nuevo grupo'}
         </p>
-        <input placeholder="Nombre del grupo (ej: Panadería, Repostería...)" value={nombre}
-          onChange={e => setNombre(e.target.value)}
-          autoCorrect="off" autoCapitalize="off" spellCheck="false"
-          style={inputStyle} />
+        <input placeholder="Nombre del grupo" value={nombre} onChange={e => setNombre(e.target.value)}
+          autoCorrect="off" autoCapitalize="off" spellCheck="false" style={inputStyle} />
         <input placeholder="Horario de corte (ej: 12:00, 18:00 — opcional)" value={horario}
           onChange={e => setHorario(e.target.value)}
-          autoCorrect="off" autoCapitalize="off" spellCheck="false"
-          style={inputStyle} />
+          autoCorrect="off" autoCapitalize="off" spellCheck="false" style={inputStyle} />
         <p style={{ fontSize:'12px', color: G.gris, marginBottom:'12px', marginTop:'-4px' }}>
           El horario de corte es la hora límite para recibir pedidos de este grupo.
         </p>
@@ -171,7 +158,6 @@ function GestionGrupos({ onVolver }) {
         </div>
       </div>
 
-      {/* Lista de grupos */}
       <p style={{ fontWeight:'bold', color: G.gris, fontSize:'12px', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>
         Grupos ({grupos.length})
       </p>
@@ -180,7 +166,7 @@ function GestionGrupos({ onVolver }) {
           {confirmEliminar === g.id ? (
             <div>
               <p style={{ margin:'0 0 10px', fontSize:'14px', color: G.rojo }}>
-                ⚠️ ¿Eliminar "{g.nombre}"? Los productos de este grupo no se borran.
+                ⚠️ ¿Seguro que querés eliminar "{g.nombre}"? Los productos de este grupo no se borran.
               </p>
               <div style={{ display:'flex', gap:'8px' }}>
                 <button onClick={() => setConfirmEliminar(null)}
@@ -197,8 +183,10 @@ function GestionGrupos({ onVolver }) {
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <div>
                 <p style={{ margin:0, fontWeight:'bold', color: G.texto, fontSize:'15px' }} translate="no">{g.nombre}</p>
-                {g.horario && <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>⏰ Corte: {g.horario}</p>}
-                {!g.horario && <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>Sin horario de corte</p>}
+                {g.horario
+                  ? <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>⏰ Corte: {g.horario}</p>
+                  : <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>Sin horario de corte</p>
+                }
               </div>
               <div style={{ display:'flex', gap:'6px' }}>
                 <button onClick={() => iniciarEdicion(g)}
@@ -217,7 +205,6 @@ function GestionGrupos({ onVolver }) {
   )
 }
 
-// ─── CATÁLOGO ─────────────────────────────────────────────────
 function Catalogo() {
   const [grupos, setGrupos] = useState([])
   const [productos, setProductos] = useState([])
@@ -233,6 +220,8 @@ function Catalogo() {
   const [editando, setEditando] = useState(null)
   const [mostrarForm, setMostrarForm] = useState(false)
   const [verGestionGrupos, setVerGestionGrupos] = useState(false)
+  const [menuProducto, setMenuProducto] = useState(null)
+  const [confirmEliminarProducto, setConfirmEliminarProducto] = useState(null)
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'grupos'), snap => {
@@ -281,7 +270,7 @@ function Catalogo() {
   const iniciarEdicion = (p) => {
     setEditando(p); setNombre(p.nombre); setMedida(p.medida)
     setGrupoId(p.grupoId || ''); setSubgrupo(p.subgrupo || '')
-    setMostrarForm(true); window.scrollTo(0, 0)
+    setMostrarForm(true); setMenuProducto(null); window.scrollTo(0, 0)
   }
 
   const cancelarEdicion = () => {
@@ -291,25 +280,81 @@ function Catalogo() {
 
   const toggleActivo = async (p) => {
     await updateDoc(doc(db, 'productos', p.id), { activo: !p.activo })
+    setMenuProducto(null)
   }
 
-  const grupoActual = grupos.find(g => g.id === tabGrupo)
+  const eliminarProducto = async (p) => {
+    await deleteDoc(doc(db, 'productos', p.id))
+    setConfirmEliminarProducto(null)
+    setMenuProducto(null)
+  }
+
   const activos = productos.filter(p => p.activo && p.grupoId === tabGrupo)
   const inactivos = productos.filter(p => !p.activo && p.grupoId === tabGrupo)
   const subgruposActivos = [...new Set(activos.map(p => p.subgrupo || '—'))]
 
   const inputStyle = {
     width:'100%', padding:'10px', marginBottom:'10px', borderRadius:'8px',
-    border:`1px solid ${G.borde}`, boxSizing:'border-box',
-    background:'white', color: G.texto, fontSize:'15px'
+    border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto, fontSize:'15px'
   }
+
+  const ProductoCard = ({ p }) => (
+    <div style={{ background:'white', padding:'12px 14px', borderRadius:'10px', marginBottom:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+      {confirmEliminarProducto === p.id ? (
+        <div>
+          <p style={{ margin:'0 0 10px', fontSize:'14px', color: G.rojo }}>
+            ⚠️ ¿Seguro que querés eliminar "{p.nombre}"?
+          </p>
+          <div style={{ display:'flex', gap:'8px' }}>
+            <button onClick={() => setConfirmEliminarProducto(null)}
+              style={{ flex:1, padding:'8px', background: G.borde, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>
+              Cancelar
+            </button>
+            <button onClick={() => eliminarProducto(p)}
+              style={{ flex:1, padding:'8px', background: G.rojo, color:'white', border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>
+              Sí, eliminar
+            </button>
+          </div>
+        </div>
+      ) : menuProducto === p.id ? (
+        <div>
+          <p style={{ margin:'0 0 10px', fontSize:'14px', fontWeight:'bold', color: G.texto }}>{p.nombre}</p>
+          <div style={{ display:'flex', gap:'8px' }}>
+            <button onClick={() => setMenuProducto(null)}
+              style={{ flex:1, padding:'8px', background: G.borde, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>
+              Cancelar
+            </button>
+            <button onClick={() => toggleActivo(p)}
+              style={{ flex:1, padding:'8px', background:'#fef9c3', color:'#854d0e', border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>
+              Desactivar
+            </button>
+            <button onClick={() => { setConfirmEliminarProducto(p.id); setMenuProducto(null) }}
+              style={{ flex:1, padding:'8px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>
+              Eliminar
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div style={{ flex:1, marginRight:'10px' }}>
+            <p style={{ margin:0, fontWeight:'bold', color: G.texto, fontSize:'15px' }}>{p.nombre}</p>
+            <p style={{ margin:0, fontSize:'12px', color: G.gris, marginTop:'2px' }}>{p.medida}</p>
+          </div>
+          <div style={{ display:'flex', gap:'6px' }}>
+            <button onClick={() => iniciarEdicion(p)}
+              style={{ padding:'7px 12px', background:'#fef9c3', color:'#854d0e', border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✏️</button>
+            <button onClick={() => setMenuProducto(p.id)}
+              style={{ padding:'7px 12px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✕</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 
   if (verGestionGrupos) return <GestionGrupos onVolver={() => setVerGestionGrupos(false)} />
 
   return (
     <div style={{ maxWidth:'520px', margin:'0 auto' }}>
-
-      {/* Tabs de grupos */}
       <div style={{ background:'white', position:'sticky', top:'52px', zIndex:90, borderBottom:`1px solid ${G.borde}` }}>
         <div style={{ display:'flex', overflowX:'auto', scrollbarWidth:'none' }}>
           {grupos.map(g => (
@@ -341,7 +386,6 @@ function Catalogo() {
           </div>
         ) : (
           <>
-            {/* Botón agregar / formulario */}
             {!mostrarForm ? (
               <button onClick={() => { setGrupoId(tabGrupo || ''); setMostrarForm(true) }}
                 style={{ width:'100%', padding:'12px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px', marginBottom:'20px' }}>
@@ -352,8 +396,6 @@ function Catalogo() {
                 <p style={{ fontWeight:'bold', marginBottom:'14px', color: editando ? '#854d0e' : G.cafe, fontSize:'15px' }}>
                   {editando ? `✏️ Editando: ${editando.nombre}` : '➕ Nuevo producto'}
                 </p>
-
-                {/* Selector de grupo */}
                 <div style={{ display:'flex', gap:'6px', marginBottom:'12px', flexWrap:'wrap' }}>
                   {grupos.map(g => (
                     <button key={g.id} type="button" translate="no"
@@ -367,8 +409,6 @@ function Catalogo() {
                     </button>
                   ))}
                 </div>
-
-                {/* Subgrupo */}
                 <div style={{ position:'relative', marginBottom:'10px' }}>
                   <input placeholder="Subgrupo (opcional)" value={subgrupo}
                     onChange={e => { setSubgrupo(e.target.value); setMostrarSug(true) }}
@@ -389,14 +429,11 @@ function Catalogo() {
                     </div>
                   )}
                 </div>
-
                 <input placeholder="Nombre del producto" value={nombre} onChange={e => setNombre(e.target.value)}
                   autoCorrect="off" autoCapitalize="off" spellCheck="false" style={inputStyle} />
                 <input placeholder="Medida / peso (ej: 1 lb, 500g, unidad)" value={medida} onChange={e => setMedida(e.target.value)}
                   autoCorrect="off" autoCapitalize="off" spellCheck="false" style={{ ...inputStyle, marginBottom:'14px' }} />
-
                 {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize:'13px', marginBottom:'10px' }}>{msg}</p>}
-
                 <div style={{ display:'flex', gap:'8px' }}>
                   <button onClick={cancelarEdicion}
                     style={{ flex:1, padding:'11px', background: G.borde, color: G.texto, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'14px' }}>
@@ -410,23 +447,11 @@ function Catalogo() {
               </div>
             )}
 
-            {/* Lista productos */}
             {subgruposActivos.map((sg, idx) => (
               <div key={sg} style={{ marginBottom:'20px' }}>
                 <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px', paddingLeft:'2px' }}>{sg}</p>
                 {activos.filter(p => (p.subgrupo || '—') === sg).map(p => (
-                  <div key={p.id} style={{ background:'white', padding:'12px 14px', borderRadius:'10px', marginBottom:'8px', display:'flex', justifyContent:'space-between', alignItems:'center', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-                    <div style={{ flex:1, marginRight:'10px' }}>
-                      <p style={{ margin:0, fontWeight:'bold', color: G.texto, fontSize:'15px' }}>{p.nombre}</p>
-                      <p style={{ margin:0, fontSize:'12px', color: G.gris, marginTop:'2px' }}>{p.medida}</p>
-                    </div>
-                    <div style={{ display:'flex', gap:'6px' }}>
-                      <button onClick={() => iniciarEdicion(p)}
-                        style={{ padding:'7px 12px', background:'#fef9c3', color:'#854d0e', border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✏️</button>
-                      <button onClick={() => toggleActivo(p)}
-                        style={{ padding:'7px 12px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✕</button>
-                    </div>
-                  </div>
+                  <ProductoCard key={p.id} p={p} />
                 ))}
                 {idx < subgruposActivos.length - 1 && (
                   <div style={{ height:'1px', background: G.borde, margin:'4px 0 20px' }} />
@@ -440,7 +465,6 @@ function Catalogo() {
               </p>
             )}
 
-            {/* Inactivos */}
             {inactivos.length > 0 && (
               <div style={{ marginTop:'24px', opacity:0.65 }}>
                 <p style={{ fontWeight:'bold', color: G.gris, marginBottom:'10px', fontSize:'12px', textTransform:'uppercase', letterSpacing:'1px' }}>
@@ -452,10 +476,16 @@ function Catalogo() {
                       <p style={{ margin:0, fontWeight:'bold', fontSize:'14px' }}>{p.nombre}</p>
                       <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{p.medida} · {p.subgrupo}</p>
                     </div>
-                    <button onClick={() => toggleActivo(p)}
-                      style={{ padding:'6px 12px', background:'#dcfce7', color: G.verde, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'12px' }}>
-                      Activar
-                    </button>
+                    <div style={{ display:'flex', gap:'6px' }}>
+                      <button onClick={() => toggleActivo(p)}
+                        style={{ padding:'6px 12px', background:'#dcfce7', color: G.verde, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'12px' }}>
+                        Activar
+                      </button>
+                      <button onClick={() => setConfirmEliminarProducto(p.id)}
+                        style={{ padding:'6px 12px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'12px' }}>
+                        🗑️
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
