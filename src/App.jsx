@@ -33,16 +33,36 @@ async function registrarPush(uid) {
   } catch (err) { console.error('Error push:', err) }
 }
 
+function limpiarBadge() {
+  try {
+    if (navigator.clearAppBadge) navigator.clearAppBadge()
+  } catch (e) {}
+}
+
 export default function App() {
   const [user, setUser] = useState(null)
   const [perfil, setPerfil] = useState(null)
   const [tab, setTab] = useState('nuevo-pedido')
+
+  // Limpiar badge cuando la app recibe foco
+  useEffect(() => {
+    limpiarBadge()
+    const onFocus = () => limpiarBadge()
+    const onVisibility = () => { if (!document.hidden) limpiarBadge() }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async currentUser => {
       setUser(currentUser)
       if (currentUser) {
         registrarPush(currentUser.uid)
+        limpiarBadge()
         const id = currentUser.email.toLowerCase().replace(/[^a-z0-9]/g, '_')
         const snap = await getDoc(doc(db, 'usuarios', id))
         if (snap.exists()) {
@@ -93,7 +113,7 @@ export default function App() {
       </div>
       <div style={{ position:'fixed', bottom:0, left:0, right:0, background:'white', borderTop:`1px solid ${G.borde}`, display:'flex' }}>
         {tabs.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
+          <button key={t.key} onClick={() => { setTab(t.key); limpiarBadge() }}
             style={{ flex:1, padding:'12px 4px', border:'none', background: tabActual === t.key ? G.cafeClaro : 'white', color: tabActual === t.key ? G.cafe : G.gris, fontWeight: tabActual === t.key ? 'bold' : 'normal', cursor:'pointer', fontSize:'11px' }}>
             {t.label}
           </button>
