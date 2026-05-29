@@ -43,13 +43,11 @@ export default function App() {
       setUser(currentUser)
       if (currentUser) {
         registrarPush(currentUser.uid)
-        // Leer perfil desde Firestore
         const id = currentUser.email.toLowerCase().replace(/[^a-z0-9]/g, '_')
         const snap = await getDoc(doc(db, 'usuarios', id))
         if (snap.exists()) {
           setPerfil(snap.data())
         } else {
-          // Si no tiene perfil en Firestore, usar ADMINS como fallback
           setPerfil({ rol: ADMINS.includes(currentUser.email) ? 'admin' : 'vendedor' })
         }
       } else {
@@ -65,14 +63,15 @@ export default function App() {
   const isAdmin = rol === 'admin'
 
   const tabs = [
-    ...(rol !== 'produccion' ? [{ key:'nuevo-pedido', label:'➕ Pedido' }] : []),
-    ...(rol !== 'produccion' ? [{ key:'mis-pedidos', label:'📦 Mis pedidos' }] : []),
-    { key:'consolidado', label:'📊 Consolidado' },
+    ...(rol === 'vendedor' ? [{ key:'nuevo-pedido', label:'➕ Pedido' }] : []),
+    ...(rol === 'vendedor' ? [{ key:'mis-pedidos', label:'📦 Mis pedidos' }] : []),
+    ...(rol === 'admin' ? [{ key:'nuevo-pedido', label:'➕ Pedido' }] : []),
+    ...(rol === 'admin' ? [{ key:'mis-pedidos', label:'📦 Mis pedidos' }] : []),
+    ...(rol !== 'vendedor' ? [{ key:'consolidado', label:'📊 Consolidado' }] : []),
     ...(isAdmin ? [{ key:'catalogo', label:'📋 Catálogo' }] : []),
     ...(isAdmin ? [{ key:'usuarios', label:'👥 Usuarios' }] : []),
   ]
 
-  // Si la tab actual no está disponible para este rol, ir a la primera disponible
   const tabsKeys = tabs.map(t => t.key)
   const tabActual = tabsKeys.includes(tab) ? tab : tabsKeys[0]
 
