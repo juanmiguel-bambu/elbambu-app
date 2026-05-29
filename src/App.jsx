@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { auth, db } from './firebase'
 import { onAuthStateChanged, signOut } from 'firebase/auth'
-import { doc, setDoc } from 'firebase/firestore'
+import { doc, setDoc, getDoc } from 'firebase/firestore'
 import Login from './components/Login'
 import Catalogo from './components/Catalogo'
 import NuevoPedido from './components/NuevoPedido'
 import MisPedidos from './components/MisPedidos'
 import Consolidado from './components/Consolidado'
+import Usuarios from './components/Usuarios'
 import { VAPID_PUBLIC_KEY, ADMINS, G } from './components/constants'
 
 function urlBase64ToUint8Array(base64String) {
@@ -34,26 +35,46 @@ async function registrarPush(uid) {
 
 export default function App() {
   const [user, setUser] = useState(null)
+  const [perfil, setPerfil] = useState(null)
   const [tab, setTab] = useState('nuevo-pedido')
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, currentUser => {
+    const unsub = onAuthStateChanged(auth, async currentUser => {
       setUser(currentUser)
-      if (currentUser) registrarPush(currentUser.uid)
+      if (currentUser) {
+        registrarPush(currentUser.uid)
+        // Leer perfil desde Firestore
+        const id = currentUser.email.toLowerCase().replace(/[^a-z0-9]/g, '_')
+        const snap = await getDoc(doc(db, 'usuarios', id))
+        if (snap.exists()) {
+          setPerfil(snap.data())
+        } else {
+          // Si no tiene perfil en Firestore, usar ADMINS como fallback
+          setPerfil({ rol: ADMINS.includes(currentUser.email) ? 'admin' : 'vendedor' })
+        }
+      } else {
+        setPerfil(null)
+      }
     })
     return () => unsub()
   }, [])
 
-  if (!user) return <Login />
+  if (!user || !perfil) return <Login />
 
-  const isAdmin = ADMINS.includes(user.email)
+  const rol = perfil.rol
+  const isAdmin = rol === 'admin'
 
   const tabs = [
-    { key:'nuevo-pedido', label:'➕ Pedido' },
-    { key:'mis-pedidos', label:'📦 Mis pedidos' },
+    ...(rol !== 'produccion' ? [{ key:'nuevo-pedido', label:'➕ Pedido' }] : []),
+    ...(rol !== 'produccion' ? [{ key:'mis-pedidos', label:'📦 Mis pedidos' }] : []),
     { key:'consolidado', label:'📊 Consolidado' },
     ...(isAdmin ? [{ key:'catalogo', label:'📋 Catálogo' }] : []),
+    ...(isAdmin ? [{ key:'usuarios', label:'👥 Usuarios' }] : []),
   ]
+
+  // Si la tab actual no está disponible para este rol, ir a la primera disponible
+  const tabsKeys = tabs.map(t => t.key)
+  const tabActual = tabsKeys.includes(tab) ? tab : tabsKeys[0]
 
   return (
     <div translate="no" style={{ minHeight:'100vh', background: G.cafeClaro, paddingBottom:'70px' }}>
@@ -65,16 +86,16 @@ export default function App() {
         </div>
       </div>
       <div>
-        {tab === 'nuevo-pedido' && <NuevoPedido user={user} />}
-        {tab === 'mis-pedidos' && <MisPedidos user={user} />}
-        {tab === 'consolidado' && <Consolidado />}
-        {tab === 'catalogo' && isAdmin && <Catalogo />}
-        {tab === 'catalogo' && !isAdmin && <p style={{ textAlign:'center', color: G.gris, marginTop:'40px' }}>Sin acceso.</p>}
+        {tabActual === 'nuevo-pedido' && <NuevoPedido user={user} />}
+        {tabActual === 'mis-pedidos' && <MisPedidos user={user} />}
+        {tabActual === 'consolidado' && <Consolidado />}
+        {tabActual === 'catalogo' && isAdmin && <Catalogo />}
+        {tabActual === 'usuarios' && isAdmin && <Usuarios />}
       </div>
       <div style={{ position:'fixed', bottom:0, left:0, right:0, background:'white', borderTop:`1px solid ${G.borde}`, display:'flex' }}>
         {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            style={{ flex:1, padding:'12px 4px', border:'none', background: tab === t.key ? G.cafeClaro : 'white', color: tab === t.key ? G.cafe : G.gris, fontWeight: tab === t.key ? 'bold' : 'normal', cursor:'pointer', fontSize:'11px' }}>
+            style={{ flex:1, padding:'12px 4px', border:'none', background: tabActual === t.key ? G.cafeClaro : 'white', color: tabActual === t.key ? G.cafe : G.gris, fontWeight: tabActual === t.key ? 'bold' : 'normal', cursor:'pointer', fontSize:'11px' }}>
             {t.label}
           </button>
         ))}
