@@ -1,0 +1,24 @@
+{
+  "name": "El Bambú",
+  "short_name": "El Bambú",
+  "description": "App de gestión para Panadería El Bambú",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f0eb",
+  "theme_color": "#8B6B3E",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
