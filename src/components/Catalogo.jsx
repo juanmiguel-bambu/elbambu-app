@@ -1,0 +1,200 @@
+import { useState, useEffect } from 'react'
+import { db } from '../firebase'
+import { doc, setDoc, collection, onSnapshot, updateDoc, deleteDoc } from 'firebase/firestore'
+import { G } from './constants'
+import GestionGrupos from './GestionGrupos'
+
+export default function Catalogo() {
+  const [grupos, setGrupos] = useState([])
+  const [productos, setProductos] = useState([])
+  const [tabGrupo, setTabGrupo] = useState(null)
+  const [nombre, setNombre] = useState('')
+  const [medida, setMedida] = useState('')
+  const [grupoId, setGrupoId] = useState('')
+  const [subgrupo, setSubgrupo] = useState('')
+  const [sugerencias, setSugerencias] = useState([])
+  const [mostrarSug, setMostrarSug] = useState(false)
+  const [guardando, setGuardando] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [editando, setEditando] = useState(null)
+  const [mostrarForm, setMostrarForm] = useState(false)
+  const [verGestionGrupos, setVerGestionGrupos] = useState(false)
+  const [menuProducto, setMenuProducto] = useState(null)
+  const [confirmEliminarProducto, setConfirmEliminarProducto] = useState(null)
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'grupos'), snap => {
+      const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      lista.sort((a, b) => (a.orden || 0) - (b.orden || 0))
+      setGrupos(lista)
+      if (lista.length > 0 && !tabGrupo) setTabGrupo(lista[0].id)
+    })
+    return () => unsub()
+  }, [])
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'productos'), snap => {
+      const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      lista.sort((a, b) => (a.subgrupo||'').localeCompare(b.subgrupo||'') || a.nombre.localeCompare(b.nombre))
+      setProductos(lista)
+    })
+    return () => unsub()
+  }, [])
+
+  useEffect(() => {
+    const subs = [...new Set(productos.filter(p => p.grupoId === grupoId && p.subgrupo).map(p => p.subgrupo))]
+    setSugerencias(subs)
+  }, [grupoId, productos])
+
+  const sugerenciasFiltradas = sugerencias.filter(s => subgrupo === '' || s.toLowerCase().includes(subgrupo.toLowerCase()))
+
+  const guardar = async () => {
+    if (!nombre.trim() || !medida.trim() || !grupoId) { setMsg('⚠️ Completá todos los campos'); return }
+    setGuardando(true)
+    const datos = { nombre: nombre.trim(), medida: medida.trim(), grupoId, subgrupo: subgrupo.trim(), activo: true }
+    if (editando) {
+      await updateDoc(doc(db, 'productos', editando.id), datos)
+      setEditando(null); setMsg('Producto actualizado ✅')
+    } else {
+      await setDoc(doc(db, 'productos', Date.now().toString()), { ...datos, creadoEn: new Date() })
+      setMsg('Producto guardado ✅')
+    }
+    setNombre(''); setMedida(''); setSubgrupo('')
+    setTimeout(() => { setMsg(''); setMostrarForm(false) }, 1500)
+    setGuardando(false)
+  }
+
+  const iniciarEdicion = (p) => { setEditando(p); setNombre(p.nombre); setMedida(p.medida); setGrupoId(p.grupoId || ''); setSubgrupo(p.subgrupo || ''); setMostrarForm(true); setMenuProducto(null); window.scrollTo(0,0) }
+  const cancelarEdicion = () => { setEditando(null); setNombre(''); setMedida(''); setSubgrupo(''); setGrupoId(tabGrupo || ''); setMostrarForm(false) }
+  const toggleActivo = async (p) => { await updateDoc(doc(db, 'productos', p.id), { activo: !p.activo }); setMenuProducto(null) }
+  const eliminarProducto = async (p) => { await deleteDoc(doc(db, 'productos', p.id)); setConfirmEliminarProducto(null); setMenuProducto(null) }
+
+  const activos = productos.filter(p => p.activo && p.grupoId === tabGrupo)
+  const inactivos = productos.filter(p => !p.activo && p.grupoId === tabGrupo)
+  const subgruposActivos = [...new Set(activos.map(p => p.subgrupo || '—'))]
+
+  const inputStyle = { width:'100%', padding:'10px', marginBottom:'10px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto, fontSize:'15px' }
+
+  const ProductoCard = ({ p }) => (
+    <div style={{ background:'white', padding:'12px 14px', borderRadius:'10px', marginBottom:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+      {confirmEliminarProducto === p.id ? (
+        <div>
+          <p style={{ margin:'0 0 10px', fontSize:'14px', color: G.rojo }}>⚠️ ¿Seguro que querés eliminar "{p.nombre}"?</p>
+          <div style={{ display:'flex', gap:'8px' }}>
+            <button onClick={() => setConfirmEliminarProducto(null)} style={{ flex:1, padding:'8px', background: G.borde, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>Cancelar</button>
+            <button onClick={() => eliminarProducto(p)} style={{ flex:1, padding:'8px', background: G.rojo, color:'white', border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>Sí, eliminar</button>
+          </div>
+        </div>
+      ) : menuProducto === p.id ? (
+        <div>
+          <p style={{ margin:'0 0 10px', fontSize:'14px', fontWeight:'bold', color: G.texto }}>{p.nombre}</p>
+          <div style={{ display:'flex', gap:'8px' }}>
+            <button onClick={() => setMenuProducto(null)} style={{ flex:1, padding:'8px', background: G.borde, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>Cancelar</button>
+            <button onClick={() => toggleActivo(p)} style={{ flex:1, padding:'8px', background: G.amarilloClaro, color: G.amarillo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>Desactivar</button>
+            <button onClick={() => { setConfirmEliminarProducto(p.id); setMenuProducto(null) }} style={{ flex:1, padding:'8px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>Eliminar</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div style={{ flex:1, marginRight:'10px' }}>
+            <p style={{ margin:0, fontWeight:'bold', color: G.texto, fontSize:'15px' }}>{p.nombre}</p>
+            <p style={{ margin:0, fontSize:'12px', color: G.gris, marginTop:'2px' }}>{p.medida}</p>
+          </div>
+          <div style={{ display:'flex', gap:'6px' }}>
+            <button onClick={() => iniciarEdicion(p)} style={{ padding:'7px 12px', background: G.amarilloClaro, color: G.amarillo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✏️</button>
+            <button onClick={() => setMenuProducto(p.id)} style={{ padding:'7px 12px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✕</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  if (verGestionGrupos) return <GestionGrupos onVolver={() => setVerGestionGrupos(false)} />
+
+  return (
+    <div style={{ maxWidth:'520px', margin:'0 auto' }}>
+      <div style={{ background:'white', position:'sticky', top:'52px', zIndex:90, borderBottom:`1px solid ${G.borde}` }}>
+        <div style={{ display:'flex', overflowX:'auto', scrollbarWidth:'none' }}>
+          {grupos.map(g => (
+            <button key={g.id} translate="no" onClick={() => setTabGrupo(g.id)}
+              style={{ flexShrink:0, padding:'13px 16px', border:'none', background:'transparent', color: tabGrupo === g.id ? G.cafe : G.gris, fontWeight: tabGrupo === g.id ? 'bold' : 'normal', borderBottom: tabGrupo === g.id ? `3px solid ${G.cafe}` : '3px solid transparent', cursor:'pointer', fontSize:'14px', whiteSpace:'nowrap' }}>
+              {g.nombre}
+            </button>
+          ))}
+          <button onClick={() => setVerGestionGrupos(true)} style={{ flexShrink:0, padding:'13px 14px', border:'none', background:'transparent', color: G.gris, cursor:'pointer', fontSize:'18px', borderBottom:'3px solid transparent' }}>⚙️</button>
+        </div>
+      </div>
+      <div style={{ padding:'16px' }}>
+        {grupos.length === 0 ? (
+          <div style={{ textAlign:'center', marginTop:'60px' }}>
+            <p style={{ color: G.gris, marginBottom:'16px' }}>No hay grupos creados aún.</p>
+            <button onClick={() => setVerGestionGrupos(true)} style={{ padding:'12px 24px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold' }}>Crear primer grupo</button>
+          </div>
+        ) : (
+          <>
+            {!mostrarForm ? (
+              <button onClick={() => { setGrupoId(tabGrupo || ''); setMostrarForm(true) }}
+                style={{ width:'100%', padding:'12px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px', marginBottom:'20px' }}>
+                ➕ Agregar producto
+              </button>
+            ) : (
+              <div style={{ background:'white', padding:'16px', borderRadius:'10px', marginBottom:'20px', boxShadow:'0 1px 6px rgba(0,0,0,0.08)', borderTop: editando ? `3px solid #854d0e` : `3px solid ${G.cafe}` }}>
+                <p style={{ fontWeight:'bold', marginBottom:'14px', color: editando ? '#854d0e' : G.cafe, fontSize:'15px' }}>{editando ? `✏️ Editando: ${editando.nombre}` : '➕ Nuevo producto'}</p>
+                <div style={{ display:'flex', gap:'6px', marginBottom:'12px', flexWrap:'wrap' }}>
+                  {grupos.map(g => (
+                    <button key={g.id} type="button" translate="no" onClick={() => { setGrupoId(g.id); setSubgrupo('') }}
+                      style={{ padding:'7px 12px', borderRadius:'8px', border:`2px solid ${grupoId === g.id ? G.cafe : G.borde}`, background: grupoId === g.id ? G.cafe : 'white', color: grupoId === g.id ? 'white' : G.gris, cursor:'pointer', fontSize:'13px', fontWeight: grupoId === g.id ? 'bold' : 'normal' }}>
+                      {g.nombre}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ position:'relative', marginBottom:'10px' }}>
+                  <input placeholder="Subgrupo (opcional)" value={subgrupo} onChange={e => { setSubgrupo(e.target.value); setMostrarSug(true) }} onFocus={() => setMostrarSug(true)} onBlur={() => setTimeout(() => setMostrarSug(false), 150)} autoCorrect="off" autoCapitalize="off" spellCheck="false" style={inputStyle} />
+                  {mostrarSug && sugerenciasFiltradas.length > 0 && (
+                    <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:`1px solid ${G.borde}`, borderRadius:'8px', zIndex:50, boxShadow:'0 4px 12px rgba(0,0,0,0.12)' }}>
+                      {sugerenciasFiltradas.map(s => (
+                        <div key={s} onClick={() => { setSubgrupo(s); setMostrarSug(false) }} style={{ padding:'11px 14px', cursor:'pointer', fontSize:'14px', borderBottom:`1px solid ${G.borde}` }} onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro} onMouseLeave={e => e.currentTarget.style.background = 'white'}>{s}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <input placeholder="Nombre del producto" value={nombre} onChange={e => setNombre(e.target.value)} autoCorrect="off" autoCapitalize="off" spellCheck="false" style={inputStyle} />
+                <input placeholder="Medida / peso" value={medida} onChange={e => setMedida(e.target.value)} autoCorrect="off" autoCapitalize="off" spellCheck="false" style={{ ...inputStyle, marginBottom:'14px' }} />
+                {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize:'13px', marginBottom:'10px' }}>{msg}</p>}
+                <div style={{ display:'flex', gap:'8px' }}>
+                  <button onClick={cancelarEdicion} style={{ flex:1, padding:'11px', background: G.borde, color: G.texto, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'14px' }}>Cancelar</button>
+                  <button onClick={guardar} disabled={guardando} style={{ flex:2, padding:'11px', background: G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold', fontSize:'14px' }}>{guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Agregar'}</button>
+                </div>
+              </div>
+            )}
+            {subgruposActivos.map((sg, idx) => (
+              <div key={sg} style={{ marginBottom:'20px' }}>
+                <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px', paddingLeft:'2px' }}>{sg}</p>
+                {activos.filter(p => (p.subgrupo || '—') === sg).map(p => <ProductoCard key={p.id} p={p} />)}
+                {idx < subgruposActivos.length - 1 && <div style={{ height:'1px', background: G.borde, margin:'4px 0 20px' }} />}
+              </div>
+            ))}
+            {activos.length === 0 && !mostrarForm && <p style={{ textAlign:'center', color: G.gris, marginTop:'40px', fontSize:'14px' }}>No hay productos en este grupo aún.</p>}
+            {inactivos.length > 0 && (
+              <div style={{ marginTop:'24px', opacity:0.65 }}>
+                <p style={{ fontWeight:'bold', color: G.gris, marginBottom:'10px', fontSize:'12px', textTransform:'uppercase', letterSpacing:'1px' }}>INACTIVOS ({inactivos.length})</p>
+                {inactivos.map(p => (
+                  <div key={p.id} style={{ background:'#f9f9f9', padding:'11px 14px', borderRadius:'10px', marginBottom:'7px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <div>
+                      <p style={{ margin:0, fontWeight:'bold', fontSize:'14px' }}>{p.nombre}</p>
+                      <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{p.medida} · {p.subgrupo}</p>
+                    </div>
+                    <div style={{ display:'flex', gap:'6px' }}>
+                      <button onClick={() => toggleActivo(p)} style={{ padding:'6px 12px', background:'#dcfce7', color: G.verde, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'12px' }}>Activar</button>
+                      <button onClick={() => setConfirmEliminarProducto(p.id)} style={{ padding:'6px 12px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'12px' }}>🗑️</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
