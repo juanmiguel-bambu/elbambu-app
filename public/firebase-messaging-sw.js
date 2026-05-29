@@ -4,7 +4,6 @@ self.addEventListener('push', (event) => {
   const options = {
     body: data.body || 'Nuevo aviso',
     icon: '/favicon.svg',
-    badge: '/favicon.svg',
     vibrate: [200, 100, 200],
     tag: 'pedido-nuevo',
     renotify: true
