@@ -44,7 +44,6 @@ export default function App() {
   const [perfil, setPerfil] = useState(null)
   const [tab, setTab] = useState('nuevo-pedido')
 
-  // Limpiar badge cuando la app recibe foco
   useEffect(() => {
     limpiarBadge()
     const onFocus = () => limpiarBadge()
@@ -98,7 +97,10 @@ export default function App() {
   return (
     <div translate="no" style={{ minHeight:'100vh', background: G.cafeClaro, paddingBottom:'70px' }}>
       <div style={{ background: G.cafe, color:'white', padding:'14px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', position:'sticky', top:0, zIndex:100 }}>
-        <span style={{ fontWeight:'bold', fontSize:'18px' }}>🍞 El Bambú</span>
+        <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+          <img src="/icon-192.png" alt="" style={{ width:'28px', height:'28px', borderRadius:'6px' }} />
+          <span style={{ fontWeight:'bold', fontSize:'18px' }}>El Bambú</span>
+        </div>
         <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
           <span style={{ fontSize:'13px', opacity:0.8 }}>{user.email.split('@')[0]}</span>
           <button onClick={() => signOut(auth)} style={{ background:'rgba(255,255,255,0.2)', color:'white', border:'none', padding:'6px 12px', borderRadius:'6px', cursor:'pointer', fontSize:'13px' }}>Salir</button>

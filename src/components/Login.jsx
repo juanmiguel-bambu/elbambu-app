@@ -20,7 +20,8 @@ export default function Login() {
     <div style={{ display:'flex', justifyContent:'center', alignItems:'center', height:'100vh', background: G.cafeClaro }}>
       <div style={{ width:'300px', background:'white', padding:'32px', borderRadius:'12px', boxShadow:'0 2px 12px rgba(0,0,0,0.1)' }}>
         <div style={{ textAlign:'center', marginBottom:'24px' }}>
-          <div style={{ fontSize:'40px' }}>🍞</div>
+          <img src="/icon-192.png" alt="El Bambú"
+            style={{ width:'80px', height:'80px', borderRadius:'18px', marginBottom:'8px', display:'block', margin:'0 auto 8px' }} />
           <h2 style={{ color: G.cafe, margin:'8px 0 0' }}>El Bambú</h2>
         </div>
         <form onSubmit={handleLogin}>
