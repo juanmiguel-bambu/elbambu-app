@@ -1,20 +1,22 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { db } from '../firebase'
-import { collection, getDocs, query, where } from 'firebase/firestore'
+import { collection, getDocs, query, where, onSnapshot } from 'firebase/firestore'
 import { G } from './constants'
 
-export default function Consolidado() {
+export default function Consolidado({ userEmail }) {
   const [grupos, setGrupos] = useState([])
   const [tabGrupo, setTabGrupo] = useState(null)
   const [fecha, setFecha] = useState('')
   const [consolidado, setConsolidado] = useState([])
   const [cargando, setCargando] = useState(false)
   const [detalleAbierto, setDetalleAbierto] = useState(null)
+  const [contadores, setContadores] = useState({})
+
+  const hoy = new Date()
+  const fechaHoy = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`
 
   useEffect(() => {
-    const hoy = new Date()
-    const f = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`
-    setFecha(f)
+    setFecha(fechaHoy)
   }, [])
 
   useEffect(() => {
@@ -27,6 +29,40 @@ export default function Consolidado() {
     }
     unsub_grupos()
   }, [])
+
+  // Listener en tiempo real para contar pedidos nuevos del día
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'pedidos'), where('fechaEntrega', '==', fechaHoy)),
+      (snap) => {
+        const pedidos = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        const nuevosContadores = {}
+
+        grupos.forEach(g => {
+          const keyStorage = `visto_${userEmail}_${g.id}_${fechaHoy}`
+          const ultimoVisto = Number(localStorage.getItem(keyStorage) || 0)
+
+          const pedidosNuevos = pedidos.filter(p =>
+            p.items?.some(item => item.grupoId === g.id) &&
+            (p.creadoEn?.seconds || 0) * 1000 > ultimoVisto
+          )
+          nuevosContadores[g.id] = pedidosNuevos.length
+        })
+
+        setContadores(nuevosContadores)
+      }
+    )
+    return () => unsub()
+  }, [grupos, fechaHoy, userEmail])
+
+  const entrarATab = (grupoId) => {
+    setTabGrupo(grupoId)
+    setDetalleAbierto(null)
+    // Marcar como visto
+    const keyStorage = `visto_${userEmail}_${grupoId}_${fechaHoy}`
+    localStorage.setItem(keyStorage, Date.now().toString())
+    setContadores(prev => ({ ...prev, [grupoId]: 0 }))
+  }
 
   useEffect(() => {
     if (!fecha || !tabGrupo) return
@@ -43,7 +79,6 @@ export default function Consolidado() {
       ))
       const pedidos = snap.docs.map(d => ({ id: d.id, ...d.data() }))
 
-      // Agrupar por producto dentro del grupo activo
       const mapa = {}
       pedidos.forEach(pedido => {
         pedido.items?.forEach(item => {
@@ -76,35 +111,45 @@ export default function Consolidado() {
 
   const totalGeneral = consolidado.reduce((acc, p) => acc + p.total, 0)
 
-  // Fecha mínima: 30 días atrás
-  const hoy = new Date()
-  const hace30 = new Date(hoy)
-  hace30.setDate(hoy.getDate() - 30)
+  const hoyObj = new Date()
+  const hace30 = new Date(hoyObj)
+  hace30.setDate(hoyObj.getDate() - 30)
   const minFecha = `${hace30.getFullYear()}-${String(hace30.getMonth()+1).padStart(2,'0')}-${String(hace30.getDate()).padStart(2,'0')}`
-  const maxFecha = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`
+  const maxFecha = fechaHoy
 
   return (
     <div style={{ maxWidth:'520px', margin:'0 auto' }}>
 
-      {/* Tabs de grupos */}
+      {/* Tabs de grupos con contadores */}
       <div style={{ background:'white', position:'sticky', top:'52px', zIndex:90, borderBottom:`1px solid ${G.borde}` }}>
         <div style={{ display:'flex', overflowX:'auto', scrollbarWidth:'none' }}>
-          {grupos.map(g => (
-            <button key={g.id} translate="no" onClick={() => setTabGrupo(g.id)}
-              style={{ flexShrink:0, padding:'13px 16px', border:'none', background:'transparent',
-                color: tabGrupo === g.id ? G.cafe : G.gris,
-                fontWeight: tabGrupo === g.id ? 'bold' : 'normal',
-                borderBottom: tabGrupo === g.id ? `3px solid ${G.cafe}` : '3px solid transparent',
-                cursor:'pointer', fontSize:'14px', whiteSpace:'nowrap' }}>
-              {g.nombre}
-            </button>
-          ))}
+          {grupos.map(g => {
+            const count = contadores[g.id] || 0
+            return (
+              <button key={g.id} translate="no" onClick={() => entrarATab(g.id)}
+                style={{ flexShrink:0, padding:'13px 16px', border:'none', background:'transparent',
+                  color: tabGrupo === g.id ? G.cafe : G.gris,
+                  fontWeight: tabGrupo === g.id ? 'bold' : 'normal',
+                  borderBottom: tabGrupo === g.id ? `3px solid ${G.cafe}` : '3px solid transparent',
+                  cursor:'pointer', fontSize:'14px', whiteSpace:'nowrap',
+                  display:'flex', alignItems:'center', gap:'6px' }}>
+                {g.nombre}
+                {count > 0 && (
+                  <span style={{
+                    background: G.rojo, color:'white',
+                    borderRadius:'10px', fontSize:'11px', fontWeight:'bold',
+                    padding:'1px 6px', minWidth:'18px', textAlign:'center'
+                  }}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
       </div>
 
       <div style={{ padding:'16px' }}>
-
-        {/* Selector de fecha */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
           <h3 style={{ color: G.cafe, margin:0 }}>📊 Consolidado</h3>
           <input type="date" value={fecha} min={minFecha} max={maxFecha}
@@ -112,7 +157,6 @@ export default function Consolidado() {
             style={{ padding:'8px 10px', borderRadius:'8px', border:`1px solid ${G.borde}`, background:'white', color: G.texto, fontSize:'14px' }} />
         </div>
 
-        {/* Resumen */}
         {!cargando && consolidado.length > 0 && (
           <div style={{ background: G.cafe, color:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'20px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
             <span style={{ fontSize:'14px' }}>{consolidado.length} producto{consolidado.length !== 1 ? 's' : ''}</span>
@@ -128,7 +172,6 @@ export default function Consolidado() {
           </p>
         )}
 
-        {/* Lista consolidada */}
         {consolidado.map((prod, idx) => (
           <div key={idx} style={{ background:'white', borderRadius:'10px', marginBottom:'10px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', overflow:'hidden' }}>
             <div style={{ padding:'14px 16px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
@@ -144,8 +187,6 @@ export default function Consolidado() {
                 </button>
               </div>
             </div>
-
-            {/* Detalle desplegable */}
             {detalleAbierto === idx && (
               <div style={{ borderTop:`1px solid ${G.borde}`, padding:'12px 16px', background:'#fafafa' }}>
                 <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>

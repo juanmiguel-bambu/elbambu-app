@@ -109,7 +109,7 @@ export default function App() {
       <div>
         {tabActual === 'nuevo-pedido' && <NuevoPedido user={user} />}
         {tabActual === 'mis-pedidos' && <MisPedidos user={user} />}
-        {tabActual === 'consolidado' && <Consolidado />}
+        {tabActual === 'consolidado' && <Consolidado userEmail={user.email} />}
         {tabActual === 'catalogo' && isAdmin && <Catalogo />}
         {tabActual === 'usuarios' && isAdmin && <Usuarios />}
       </div>
