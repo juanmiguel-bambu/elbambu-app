@@ -1,21 +1,27 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { collection, getDocs, query, where } from 'firebase/firestore'
+import { collection, getDocs, query, where, onSnapshot } from 'firebase/firestore'
 import { G } from './constants'
+
+const estadoConfig = {
+  'pendiente':      { label: 'Pendiente',      bg: '#f3f4f6', color: '#888' },
+  'recibido':       { label: 'Recibido',        bg: '#dbeafe', color: '#1d4ed8' },
+  'en produccion':  { label: 'En producción',   bg: '#fef9c3', color: '#854d0e' },
+  'horneado':       { label: 'Horneado 🍞',      bg: '#dcfce7', color: '#16a34a' },
+}
 
 export default function MisPedidos({ user }) {
   const [pedidos, setPedidos] = useState([])
   const [grupos, setGrupos] = useState([])
   const [tabGrupo, setTabGrupo] = useState(null)
   const [cargando, setCargando] = useState(true)
+  const [estadosProducto, setEstadosProducto] = useState({})
+
+  const hoy = new Date()
+  const fechaHoy = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`
 
   useEffect(() => {
-    let activo = true
-
     const cargar = async () => {
-      const hoy = new Date()
-      const fechaHoy = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`
-
       const [gruposSnap, pedidosSnap] = await Promise.all([
         getDocs(collection(db, 'grupos')),
         getDocs(query(
@@ -24,8 +30,6 @@ export default function MisPedidos({ user }) {
           where('fechaEntrega', '==', fechaHoy)
         ))
       ])
-
-      if (!activo) return
 
       const listaGrupos = gruposSnap.docs.map(d => ({ id: d.id, ...d.data() }))
       listaGrupos.sort((a, b) => (a.orden || 0) - (b.orden || 0))
@@ -38,23 +42,27 @@ export default function MisPedidos({ user }) {
       if (listaGrupos.length > 0) setTabGrupo(listaGrupos[0].id)
       setCargando(false)
     }
-
     cargar()
-    return () => { activo = false }
   }, [user.email])
+
+  // Listener en tiempo real para estados de productos
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'estadosProducto'), where('fecha', '==', fechaHoy)),
+      (snap) => {
+        const estados = {}
+        snap.docs.forEach(d => { estados[d.id] = d.data() })
+        setEstadosProducto(estados)
+      }
+    )
+    return () => unsub()
+  }, [fechaHoy])
 
   const pedidosDelGrupo = pedidos
     .filter(p => p.items?.some(item => item.grupoId === tabGrupo))
     .map(p => ({ ...p, items: p.items.filter(item => item.grupoId === tabGrupo) }))
 
   const totalItems = pedidosDelGrupo.reduce((acc, p) => acc + (p.items?.length || 0), 0)
-
-  const estadoColor = (estado) => {
-    if (estado === 'confirmado') return { bg:'#dcfce7', color: G.verde }
-    if (estado === 'en proceso') return { bg:'#fef9c3', color: G.amarillo }
-    if (estado === 'listo') return { bg:'#dbeafe', color:'#1d4ed8' }
-    return { bg:'#f3f4f6', color: G.gris }
-  }
 
   const getHora = (creadoEn) => {
     try {
@@ -66,6 +74,8 @@ export default function MisPedidos({ user }) {
 
   return (
     <div style={{ maxWidth:'520px', margin:'0 auto' }}>
+
+      {/* Tabs de grupos */}
       <div style={{ background:'white', position:'sticky', top:'52px', zIndex:90, borderBottom:`1px solid ${G.borde}` }}>
         <div style={{ display:'flex', overflowX:'auto', scrollbarWidth:'none' }}>
           {grupos.map(g => (
@@ -98,28 +108,32 @@ export default function MisPedidos({ user }) {
         )}
 
         {pedidosDelGrupo.map(pedido => {
-          const colores = estadoColor(pedido.estado)
           const horaStr = getHora(pedido.creadoEn)
           return (
             <div key={pedido.id} style={{ background:'white', borderRadius:'12px', marginBottom:'14px', boxShadow:'0 1px 6px rgba(0,0,0,0.08)', overflow:'hidden' }}>
-              <div style={{ padding:'12px 16px', borderBottom:`1px solid ${G.borde}`, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <div>
-                  {horaStr ? <p style={{ margin:0, fontSize:'13px', color: G.gris }}>Enviado a las {horaStr}</p> : null}
-                  <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>
-                    {pedido.entrega === 'panaderia' ? '🏠 Recoger en panadería' : '🚚 Entrega en ruta'} · {pedido.pago === 'pagado' ? '✅ Pagado' : '⏳ Pendiente'}
-                  </p>
-                </div>
-                <span style={{ padding:'4px 10px', borderRadius:'20px', fontSize:'12px', fontWeight:'bold', background: colores.bg, color: colores.color }}>
-                  {pedido.estado}
-                </span>
+              <div style={{ padding:'12px 16px', borderBottom:`1px solid ${G.borde}` }}>
+                {horaStr ? <p style={{ margin:0, fontSize:'13px', color: G.gris }}>Enviado a las {horaStr}</p> : null}
+                <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>
+                  {pedido.entrega === 'panaderia' ? '🏠 Recoger en panadería' : '🚚 Entrega en ruta'} · {pedido.pago === 'pagado' ? '✅ Pagado' : '⏳ Pendiente'}
+                </p>
               </div>
               <div style={{ padding:'12px 16px' }}>
-                {pedido.items?.map((item, idx) => (
-                  <div key={idx} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 0', borderBottom: idx < pedido.items.length - 1 ? `1px solid ${G.borde}` : 'none' }}>
-                    <p style={{ margin:0, fontSize:'14px', fontWeight:'bold' }}>{item.nombre}</p>
-                    <p style={{ margin:0, fontSize:'13px', color: G.gris }}>{item.medida} × {item.cantidad}</p>
-                  </div>
-                ))}
+                {pedido.items?.map((item, idx) => {
+                  const estadoKey = `${fechaHoy}_${item.productoId}`
+                  const estadoActual = estadosProducto[estadoKey]?.estado || 'pendiente'
+                  const cfg = estadoConfig[estadoActual]
+                  return (
+                    <div key={idx} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 0', borderBottom: idx < pedido.items.length - 1 ? `1px solid ${G.borde}` : 'none' }}>
+                      <div>
+                        <p style={{ margin:0, fontSize:'14px', fontWeight:'bold' }}>{item.nombre}</p>
+                        <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{item.medida} × {item.cantidad}</p>
+                      </div>
+                      <span style={{ padding:'4px 10px', borderRadius:'20px', fontSize:'12px', fontWeight:'bold', background: cfg.bg, color: cfg.color, whiteSpace:'nowrap' }}>
+                        {cfg.label}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )
