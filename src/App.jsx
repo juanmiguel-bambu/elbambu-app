@@ -8,7 +8,9 @@ import NuevoPedido from './components/NuevoPedido'
 import MisPedidos from './components/MisPedidos'
 import Consolidado from './components/Consolidado'
 import Usuarios from './components/Usuarios'
-import { VAPID_PUBLIC_KEY, ADMINS, G } from './components/constants'
+import { ADMINS, G } from './components/constants'
+
+const VAPID_PUBLIC_KEY = 'BOAhRPgcEJBXM_KsBk9TfegDoZBNPCLD6wdLT8d004bgHMdv7vJQ-nNepGusUZzWheRmq-bzG2mc6su8bawV8FM'
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4)
@@ -17,19 +19,22 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)))
 }
 
-async function registrarPush(uid) {
+async function registrarPush(uid, email) {
   try {
     const permission = await Notification.requestPermission()
     if (permission !== 'granted') return
     const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js')
     await navigator.serviceWorker.ready
+    const existingSub = await registration.pushManager.getSubscription()
+    if (existingSub) await existingSub.unsubscribe()
     const subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
     })
     await setDoc(doc(db, 'pushSubscriptions', uid), {
-      uid, subscription: JSON.parse(JSON.stringify(subscription)), updatedAt: new Date()
+      uid, email, subscription: JSON.parse(JSON.stringify(subscription)), updatedAt: new Date()
     })
+    console.log('Push registrado ✅')
   } catch (err) { console.error('Error push:', err) }
 }
 
@@ -60,7 +65,7 @@ export default function App() {
     const unsub = onAuthStateChanged(auth, async currentUser => {
       setUser(currentUser)
       if (currentUser) {
-        registrarPush(currentUser.uid)
+        registrarPush(currentUser.uid, currentUser.email)
         limpiarBadge()
         const id = currentUser.email.toLowerCase().replace(/[^a-z0-9]/g, '_')
         const snap = await getDoc(doc(db, 'usuarios', id))

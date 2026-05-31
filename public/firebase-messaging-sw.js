@@ -3,9 +3,9 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'El Bambú'
   const options = {
     body: data.body || 'Nuevo aviso',
-    icon: '/favicon.svg',
+    icon: '/icon-192.png',
     vibrate: [200, 100, 200],
-    tag: 'pedido-nuevo',
+    tag: 'elbambu',
     renotify: true
   }
   event.waitUntil(self.registration.showNotification(title, options))

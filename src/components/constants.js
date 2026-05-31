@@ -1,4 +1,4 @@
-export const VAPID_PUBLIC_KEY = 'BOAhRPgcEJBXM_KsBk9TfegDoZBNPCLD6wdLT8d004bgHMdv7vJQ-nNepGusUZzWheRmq-bzG2mc6su8bawV8FM'
+export const VAPID_PUBLIC_KEY = 'BIE6ffZIDoOfnBn4h57kgOaxeasQlGxwMGE_UNMZl7rIgJjOpUZ3WXIOAAYypLAVrl_JLx0hylkgkaNugJ8mY2s'
 export const ADMINS = ['migueljmolina79@gmail.com']
 
 export const G = {
