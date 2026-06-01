@@ -13,7 +13,8 @@ export default function NuevoPedido({ user }) {
   const [entrega, setEntrega] = useState('panaderia')
   const [pago, setPago] = useState('pagado')
   const [fechaEntrega, setFechaEntrega] = useState('')
-  const [horaEntrega, setHoraEntrega] = useState('')
+  const [turnoEntrega, setTurnoEntrega] = useState('manana')
+  const [comentario, setComentario] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [msg, setMsg] = useState('')
   const [busqueda, setBusqueda] = useState('')
@@ -81,11 +82,12 @@ export default function NuevoPedido({ user }) {
       await addDoc(collection(db, 'pedidos'), {
         vendedor: user.email,
         vendedorNombre: user.email.split('@')[0],
-        items, entrega, pago, fechaEntrega, horaEntrega,
+        items, entrega, pago, fechaEntrega, turnoEntrega,
+        comentario: comentario.trim(),
         estado: 'pendiente',
         creadoEn: serverTimestamp()
       })
-      setItems([]); setHoraEntrega(''); setEntrega('panaderia'); setPago('pagado')
+      setItems([]); setTurnoEntrega('manana'); setComentario(''); setEntrega('panaderia'); setPago('pagado')
       const hoy = new Date()
       setFechaEntrega(`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`)
       setMsg('✅ Pedido enviado')
@@ -169,10 +171,20 @@ export default function NuevoPedido({ user }) {
       {items.length > 0 && (
         <div style={{ background:'white', padding:'16px', borderRadius:'10px', marginBottom:'20px', boxShadow:'0 1px 6px rgba(0,0,0,0.08)', borderTop:`3px solid ${G.cafe}` }}>
           <p style={{ fontWeight:'bold', color: G.cafe, marginBottom:'14px' }}>Detalles</p>
+
           <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Fecha de entrega</p>
-          <input type="date" value={fechaEntrega} onChange={e => setFechaEntrega(e.target.value)} style={{ ...inputStyle, marginBottom:'10px' }} />
-          <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Hora de entrega (opcional)</p>
-          <input type="time" value={horaEntrega} onChange={e => setHoraEntrega(e.target.value)} style={{ ...inputStyle, marginBottom:'14px' }} />
+          <input type="date" value={fechaEntrega} onChange={e => setFechaEntrega(e.target.value)} style={{ ...inputStyle, marginBottom:'14px' }} />
+
+          <p style={{ fontSize:'12px', color: G.gris, marginBottom:'8px' }}>Turno de entrega</p>
+          <div style={{ display:'flex', gap:'8px', marginBottom:'14px' }}>
+            {[{ val:'manana', label:'🌅 Mañana' }, { val:'tarde', label:'🌇 Tarde' }].map(op => (
+              <button key={op.val} onClick={() => setTurnoEntrega(op.val)}
+                style={{ flex:1, padding:'10px 8px', borderRadius:'8px', border:`2px solid ${turnoEntrega === op.val ? G.cafe : G.borde}`, background: turnoEntrega === op.val ? G.cafe : 'white', color: turnoEntrega === op.val ? 'white' : G.texto, cursor:'pointer', fontSize:'13px', fontWeight: turnoEntrega === op.val ? 'bold' : 'normal' }}>
+                {op.label}
+              </button>
+            ))}
+          </div>
+
           <p style={{ fontSize:'12px', color: G.gris, marginBottom:'8px' }}>Lugar de entrega</p>
           <div style={{ display:'flex', gap:'8px', marginBottom:'14px' }}>
             {[{ val:'panaderia', label:'🏠 Recoger en panadería' }, { val:'ruta', label:'🚚 Entrega en ruta' }].map(op => (
@@ -182,8 +194,9 @@ export default function NuevoPedido({ user }) {
               </button>
             ))}
           </div>
+
           <p style={{ fontSize:'12px', color: G.gris, marginBottom:'8px' }}>Estado de pago</p>
-          <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
+          <div style={{ display:'flex', gap:'8px', marginBottom:'14px' }}>
             {[{ val:'pagado', label:'✅ Pagado' }, { val:'pendiente', label:'⏳ Pendiente' }].map(op => (
               <button key={op.val} onClick={() => setPago(op.val)}
                 style={{ flex:1, padding:'10px', borderRadius:'8px', border:`2px solid ${pago === op.val ? G.cafe : G.borde}`, background: pago === op.val ? G.cafe : 'white', color: pago === op.val ? 'white' : G.texto, cursor:'pointer', fontSize:'13px', fontWeight: pago === op.val ? 'bold' : 'normal' }}>
@@ -191,6 +204,13 @@ export default function NuevoPedido({ user }) {
               </button>
             ))}
           </div>
+
+          <p style={{ fontSize:'12px', color: G.gris, marginBottom:'8px' }}>Comentario <span style={{ fontWeight:'normal', opacity:0.6 }}>(opcional)</span></p>
+          <textarea value={comentario} onChange={e => setComentario(e.target.value)}
+            placeholder="Ej: entregar antes de las 8am, empacar por separado..."
+            rows={2}
+            style={{ ...inputStyle, resize:'vertical', marginBottom:'16px', fontFamily:'inherit' }} />
+
           {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize:'13px', marginBottom:'10px' }}>{msg}</p>}
           <button onClick={enviarPedido} disabled={enviando}
             style={{ width:'100%', padding:'14px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'16px' }}>

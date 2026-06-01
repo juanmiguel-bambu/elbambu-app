@@ -61,10 +61,11 @@ export default function MisPedidos({ user }) {
     } catch { return '' }
   }
 
+  const turnoLabel = (turno) => turno === 'tarde' ? '🌇 Tarde' : '🌅 Mañana'
+
   return (
     <div style={{ maxWidth:'520px', margin:'0 auto' }}>
 
-      {/* Tabs de grupos */}
       <div style={{ background:'white', position:'sticky', top:'52px', zIndex:90, borderBottom:`1px solid ${G.borde}` }}>
         <div style={{ display:'flex', overflowX:'auto', scrollbarWidth:'none' }}>
           {grupos.map(g => (
@@ -101,10 +102,18 @@ export default function MisPedidos({ user }) {
           return (
             <div key={pedido.id} style={{ background:'white', borderRadius:'12px', marginBottom:'14px', boxShadow:'0 1px 6px rgba(0,0,0,0.08)', overflow:'hidden' }}>
               <div style={{ padding:'12px 16px', borderBottom:`1px solid ${G.borde}` }}>
-                {horaStr ? <p style={{ margin:0, fontSize:'13px', color: G.gris }}>Enviado a las {horaStr}</p> : null}
-                <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  {horaStr ? <p style={{ margin:0, fontSize:'13px', color: G.gris }}>Enviado a las {horaStr}</p> : <span />}
+                  <span style={{ fontSize:'12px', fontWeight:'bold', color: G.cafe }}>{turnoLabel(pedido.turnoEntrega)}</span>
+                </div>
+                <p style={{ margin:'4px 0 0', fontSize:'12px', color: G.gris }}>
                   {pedido.entrega === 'panaderia' ? '🏠 Recoger en panadería' : '🚚 Entrega en ruta'} · {pedido.pago === 'pagado' ? '✅ Pagado' : '⏳ Pendiente'}
                 </p>
+                {pedido.comentario ? (
+                  <p style={{ margin:'6px 0 0', fontSize:'12px', color: G.texto, background: G.cafeClaro, padding:'6px 10px', borderRadius:'6px', borderLeft:`3px solid ${G.cafe}` }}>
+                    💬 {pedido.comentario}
+                  </p>
+                ) : null}
               </div>
               <div style={{ padding:'12px 16px' }}>
                 {pedido.items?.map((item, idx) => {

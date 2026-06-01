@@ -36,7 +36,6 @@ export default function Consolidado({ userEmail }) {
     cargarGrupos()
   }, [])
 
-  // Listener en tiempo real para contadores Y pedidos
   useEffect(() => {
     if (grupos.length === 0) return
     const unsub = onSnapshot(
@@ -104,6 +103,8 @@ export default function Consolidado({ userEmail }) {
             cantidad: Number(item.cantidad),
             entrega: pedido.entrega,
             pago: pedido.pago,
+            turno: pedido.turnoEntrega || 'manana',
+            comentario: pedido.comentario || '',
             estadoPedido: pedido.estadoItems?.[item.productoId] || 'pendiente'
           })
           if (!mapa[item.productoId].vendedores.includes(pedido.vendedor)) {
@@ -141,7 +142,6 @@ export default function Consolidado({ userEmail }) {
   return (
     <div style={{ maxWidth:'520px', margin:'0 auto' }}>
 
-      {/* Tabs de grupos con contadores */}
       <div style={{ background:'white', position:'sticky', top:'52px', zIndex:90, borderBottom:`1px solid ${G.borde}` }}>
         <div style={{ display:'flex', overflowX:'auto', scrollbarWidth:'none' }}>
           {grupos.map(g => {
@@ -196,7 +196,6 @@ export default function Consolidado({ userEmail }) {
 
           return (
             <div key={idx} style={{ background:'white', borderRadius:'10px', marginBottom:'12px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', overflow:'hidden' }}>
-              {/* Header del producto */}
               <div style={{ padding:'14px 16px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <div style={{ flex:1 }}>
                   <p style={{ margin:0, fontWeight:'bold', fontSize:'15px', color: G.texto }}>{prod.nombre}</p>
@@ -216,7 +215,6 @@ export default function Consolidado({ userEmail }) {
                 </div>
               </div>
 
-              {/* Botón Hornear todos */}
               {!todoHorneado && (
                 <div style={{ padding:'0 16px 12px' }}>
                   <button onClick={() => hornearTodos(prod)}
@@ -226,7 +224,6 @@ export default function Consolidado({ userEmail }) {
                 </div>
               )}
 
-              {/* Detalle desplegable */}
               {detalleAbierto === idx && (
                 <div style={{ borderTop:`1px solid ${G.borde}`, padding:'12px 16px', background:'#fafafa' }}>
                   <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>
@@ -236,16 +233,21 @@ export default function Consolidado({ userEmail }) {
                     const cfg = estadoConfig[d.estadoPedido]
                     return (
                       <div key={i} style={{ padding:'10px 0', borderBottom: i < prod.detalle.length - 1 ? `1px solid ${G.borde}` : 'none' }}>
-                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px' }}>
                           <div>
                             <p style={{ margin:0, fontSize:'14px', fontWeight:'bold', color: G.texto }}>{d.vendedor}</p>
                             <p style={{ margin:0, fontSize:'11px', color: G.gris }}>
-                              {d.entrega === 'panaderia' ? '🏠 Panadería' : '🚚 Ruta'} · {d.pago === 'pagado' ? '✅ Pagado' : '⏳ Pendiente'}
+                              {d.entrega === 'panaderia' ? '🏠 Panadería' : '🚚 Ruta'} · {d.pago === 'pagado' ? '✅ Pagado' : '⏳ Pendiente'} · {d.turno === 'tarde' ? '🌇 Tarde' : '🌅 Mañana'}
                             </p>
+                            {d.comentario ? (
+                              <p style={{ margin:'4px 0 0', fontSize:'11px', color: G.texto, background: G.cafeClaro, padding:'4px 8px', borderRadius:'4px', borderLeft:`2px solid ${G.cafe}` }}>
+                                💬 {d.comentario}
+                              </p>
+                            ) : null}
                           </div>
-                          <span style={{ fontWeight:'bold', fontSize:'16px', color: G.cafe }}>{d.cantidad}</span>
+                          <span style={{ fontWeight:'bold', fontSize:'16px', color: G.cafe, marginLeft:'12px' }}>{d.cantidad}</span>
                         </div>
-                        <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                        <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginTop:'8px' }}>
                           {['recibido', 'en produccion', 'horneado'].map(estado => {
                             const c = estadoConfig[estado]
                             const activo = d.estadoPedido === estado
