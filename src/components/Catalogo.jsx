@@ -35,7 +35,7 @@ export default function Catalogo() {
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'productos'), snap => {
       const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      lista.sort((a, b) => (a.subgrupo||'').localeCompare(b.subgrupo||'') || a.nombre.localeCompare(b.nombre))
+      lista.sort((a, b) => (a.subgrupo||'').localeCompare(b.subgrupo||'') || (a.creadoEn?.seconds || 0) - (b.creadoEn?.seconds || 0))
       setProductos(lista)
     })
     return () => unsub()
