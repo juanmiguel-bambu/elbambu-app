@@ -15,48 +15,37 @@ export default function MisPedidos({ user }) {
   const [grupos, setGrupos] = useState([])
   const [tabGrupo, setTabGrupo] = useState(null)
   const [cargando, setCargando] = useState(true)
-  const [estadosProducto, setEstadosProducto] = useState({})
 
   const hoy = new Date()
   const fechaHoy = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`
 
   useEffect(() => {
-    const cargar = async () => {
-      const [gruposSnap, pedidosSnap] = await Promise.all([
-        getDocs(collection(db, 'grupos')),
-        getDocs(query(
-          collection(db, 'pedidos'),
-          where('vendedor', '==', user.email),
-          where('fechaEntrega', '==', fechaHoy)
-        ))
-      ])
-
-      const listaGrupos = gruposSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-      listaGrupos.sort((a, b) => (a.orden || 0) - (b.orden || 0))
-
-      const listaPedidos = pedidosSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-      listaPedidos.sort((a, b) => (b.creadoEn?.seconds || 0) - (a.creadoEn?.seconds || 0))
-
-      setGrupos(listaGrupos)
-      setPedidos(listaPedidos)
-      if (listaGrupos.length > 0) setTabGrupo(listaGrupos[0].id)
-      setCargando(false)
+    const cargarGrupos = async () => {
+      const snap = await getDocs(collection(db, 'grupos'))
+      const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      lista.sort((a, b) => (a.orden || 0) - (b.orden || 0))
+      setGrupos(lista)
+      if (lista.length > 0) setTabGrupo(lista[0].id)
     }
-    cargar()
-  }, [user.email])
+    cargarGrupos()
+  }, [])
 
-  // Listener en tiempo real para estados de productos
   useEffect(() => {
     const unsub = onSnapshot(
-      query(collection(db, 'estadosProducto'), where('fecha', '==', fechaHoy)),
+      query(
+        collection(db, 'pedidos'),
+        where('vendedor', '==', user.email),
+        where('fechaEntrega', '==', fechaHoy)
+      ),
       (snap) => {
-        const estados = {}
-        snap.docs.forEach(d => { estados[d.id] = d.data() })
-        setEstadosProducto(estados)
+        const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        lista.sort((a, b) => (b.creadoEn?.seconds || 0) - (a.creadoEn?.seconds || 0))
+        setPedidos(lista)
+        setCargando(false)
       }
     )
     return () => unsub()
-  }, [fechaHoy])
+  }, [user.email, fechaHoy])
 
   const pedidosDelGrupo = pedidos
     .filter(p => p.items?.some(item => item.grupoId === tabGrupo))
@@ -119,8 +108,7 @@ export default function MisPedidos({ user }) {
               </div>
               <div style={{ padding:'12px 16px' }}>
                 {pedido.items?.map((item, idx) => {
-                  const estadoKey = `${fechaHoy}_${item.productoId}`
-                  const estadoActual = estadosProducto[estadoKey]?.estado || 'pendiente'
+                  const estadoActual = pedido.estadoItems?.[item.productoId] || 'pendiente'
                   const cfg = estadoConfig[estadoActual]
                   return (
                     <div key={idx} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 0', borderBottom: idx < pedido.items.length - 1 ? `1px solid ${G.borde}` : 'none' }}>

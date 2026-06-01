@@ -43,42 +43,41 @@ exports.notificarPedidoNuevo = onDocumentCreated(
 );
 
 exports.notificarHorneado = onDocumentWritten(
-  "estadosProducto/{estadoId}",
+  "pedidos/{pedidoId}",
   async (event) => {
     const antes = event.data.before.data();
     const despues = event.data.after.data();
 
-    if (!despues || despues.estado !== "horneado") return null;
-    if (antes && antes.estado === "horneado") return null;
+    if (!despues || !despues.estadoItems) return null;
 
     const db = getFirestore();
-    const { productoId, nombre, fecha } = despues;
+    const vendedorEmail = despues.vendedor;
+    const estadosAntes = antes?.estadoItems || {};
+    const estadosDespues = despues.estadoItems;
 
-    const pedidosSnap = await db.collection("pedidos")
-      .where("fechaEntrega", "==", fecha)
-      .get();
+    // Buscar productos que cambiaron A horneado en este update
+    const productosHorneados = Object.entries(estadosDespues).filter(([productoId, estado]) =>
+      estado === 'horneado' && estadosAntes[productoId] !== 'horneado'
+    )
 
-    if (pedidosSnap.empty) return null;
+    if (productosHorneados.length === 0) return null;
 
-    const vendedoresEmails = new Set();
-    pedidosSnap.docs.forEach(doc => {
-      const pedido = doc.data();
-      const tieneProducto = pedido.items?.some(item => item.productoId === productoId);
-      if (tieneProducto) vendedoresEmails.add(pedido.vendedor);
-    });
-
-    if (vendedoresEmails.size === 0) return null;
+    // Obtener nombres de productos horneados
+    const nombresProductos = productosHorneados.map(([productoId]) => {
+      const item = despues.items?.find(i => i.productoId === productoId)
+      return item?.nombre || 'Producto'
+    })
 
     const subsSnap = await db.collection("pushSubscriptions").get();
     if (subsSnap.empty) return null;
 
     const payload = JSON.stringify({
       title: "🍞 ¡Listo para entregar!",
-      body: `${nombre} está horneado — El Bambú`
+      body: `${nombresProductos.join(', ')} — El Bambú`
     });
 
     const envios = subsSnap.docs
-      .filter(doc => vendedoresEmails.has(doc.data().email))
+      .filter(doc => doc.data().email === vendedorEmail)
       .map(async (doc) => {
         const sub = doc.data().subscription;
         try {

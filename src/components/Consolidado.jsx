@@ -3,8 +3,6 @@ import { db } from '../firebase'
 import { collection, getDocs, query, where, onSnapshot, doc, updateDoc, setDoc } from 'firebase/firestore'
 import { G } from './constants'
 
-const ESTADOS = ['pendiente', 'recibido', 'en produccion', 'horneado']
-
 const estadoConfig = {
   'pendiente':      { label: 'Pendiente',      bg: '#f3f4f6', color: G.gris },
   'recibido':       { label: 'Recibido',        bg: '#dbeafe', color: '#1d4ed8' },
@@ -20,7 +18,7 @@ export default function Consolidado({ userEmail }) {
   const [cargando, setCargando] = useState(false)
   const [detalleAbierto, setDetalleAbierto] = useState(null)
   const [contadores, setContadores] = useState({})
-  const [estadosProducto, setEstadosProducto] = useState({})
+  const [pedidosSnap, setPedidosSnap] = useState([])
 
   const hoy = new Date()
   const fechaHoy = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`
@@ -38,13 +36,14 @@ export default function Consolidado({ userEmail }) {
     cargarGrupos()
   }, [])
 
-  // Listener en tiempo real para contadores
+  // Listener en tiempo real para contadores Y pedidos
   useEffect(() => {
     if (grupos.length === 0) return
     const unsub = onSnapshot(
       query(collection(db, 'pedidos'), where('fechaEntrega', '==', fechaHoy)),
       (snap) => {
         const pedidos = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        setPedidosSnap(pedidos)
         const nuevosContadores = {}
         grupos.forEach(g => {
           const keyStorage = `visto_${userEmail}_${g.id}_${fechaHoy}`
@@ -61,22 +60,6 @@ export default function Consolidado({ userEmail }) {
     return () => unsub()
   }, [grupos, fechaHoy, userEmail])
 
-  // Listener en tiempo real para estados de productos
-  useEffect(() => {
-    if (!fecha) return
-    const unsub = onSnapshot(
-      query(collection(db, 'estadosProducto'), where('fecha', '==', fecha)),
-      (snap) => {
-        const estados = {}
-        snap.docs.forEach(d => {
-          estados[d.id] = d.data()
-        })
-        setEstadosProducto(estados)
-      }
-    )
-    return () => unsub()
-  }, [fecha])
-
   const entrarATab = (grupoId) => {
     setTabGrupo(grupoId)
     setDetalleAbierto(null)
@@ -88,17 +71,17 @@ export default function Consolidado({ userEmail }) {
   useEffect(() => {
     if (!fecha || !tabGrupo) return
     cargarConsolidado()
-  }, [fecha, tabGrupo])
+  }, [fecha, tabGrupo, pedidosSnap])
 
   const cargarConsolidado = async () => {
     setCargando(true)
     setDetalleAbierto(null)
     try {
-      const snap = await getDocs(query(
-        collection(db, 'pedidos'),
-        where('fechaEntrega', '==', fecha)
-      ))
-      const pedidos = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      const snap = fecha === fechaHoy ? pedidosSnap :
+        (await getDocs(query(collection(db, 'pedidos'), where('fechaEntrega', '==', fecha)))).docs.map(d => ({ id: d.id, ...d.data() }))
+
+      const pedidos = fecha === fechaHoy ? snap : snap
+
       const mapa = {}
       pedidos.forEach(pedido => {
         pedido.items?.forEach(item => {
@@ -115,11 +98,13 @@ export default function Consolidado({ userEmail }) {
           }
           mapa[item.productoId].total += Number(item.cantidad)
           mapa[item.productoId].detalle.push({
+            pedidoId: pedido.id,
             vendedor: pedido.vendedorNombre || pedido.vendedor,
             vendedorEmail: pedido.vendedor,
             cantidad: Number(item.cantidad),
             entrega: pedido.entrega,
-            pago: pedido.pago
+            pago: pedido.pago,
+            estadoPedido: pedido.estadoItems?.[item.productoId] || 'pendiente'
           })
           if (!mapa[item.productoId].vendedores.includes(pedido.vendedor)) {
             mapa[item.productoId].vendedores.push(pedido.vendedor)
@@ -132,17 +117,18 @@ export default function Consolidado({ userEmail }) {
     setCargando(false)
   }
 
-  const cambiarEstado = async (prod, nuevoEstado) => {
-    const id = `${fecha}_${prod.productoId}`
-    await setDoc(doc(db, 'estadosProducto', id), {
-      fecha,
-      productoId: prod.productoId,
-      nombre: prod.nombre,
-      grupoId: tabGrupo,
-      estado: nuevoEstado,
-      marcadoPor: userEmail,
-      actualizadoEn: new Date()
+  const cambiarEstadoPedido = async (pedidoId, productoId, nuevoEstado) => {
+    await updateDoc(doc(db, 'pedidos', pedidoId), {
+      [`estadoItems.${productoId}`]: nuevoEstado
     })
+  }
+
+  const hornearTodos = async (prod) => {
+    await Promise.all(prod.detalle.map(d =>
+      updateDoc(doc(db, 'pedidos', d.pedidoId), {
+        [`estadoItems.${prod.productoId}`]: 'horneado'
+      })
+    ))
   }
 
   const totalGeneral = consolidado.reduce((acc, p) => acc + p.total, 0)
@@ -204,10 +190,9 @@ export default function Consolidado({ userEmail }) {
         )}
 
         {consolidado.map((prod, idx) => {
-          const estadoKey = `${fecha}_${prod.productoId}`
-          const estadoActual = estadosProducto[estadoKey]?.estado || 'pendiente'
-          const marcadoPor = estadosProducto[estadoKey]?.marcadoPor
-          const cfg = estadoConfig[estadoActual]
+          const horneados = prod.detalle.filter(d => d.estadoPedido === 'horneado').length
+          const total = prod.detalle.length
+          const todoHorneado = horneados === total
 
           return (
             <div key={idx} style={{ background:'white', borderRadius:'10px', marginBottom:'12px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', overflow:'hidden' }}>
@@ -218,7 +203,12 @@ export default function Consolidado({ userEmail }) {
                   <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>{prod.medida}</p>
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
-                  <span style={{ fontWeight:'bold', fontSize:'20px', color: G.cafe }}>{prod.total}</span>
+                  <div style={{ textAlign:'right' }}>
+                    <span style={{ fontWeight:'bold', fontSize:'20px', color: G.cafe }}>{prod.total}</span>
+                    <p style={{ margin:0, fontSize:'11px', color: todoHorneado ? G.verde : G.gris }}>
+                      {horneados}/{total} 🍞
+                    </p>
+                  </div>
                   <button onClick={() => setDetalleAbierto(detalleAbierto === idx ? null : idx)}
                     style={{ background:'none', border:'none', cursor:'pointer', fontSize:'18px', color: G.gris, padding:'4px 6px', lineHeight:1 }}>
                     ⋮
@@ -226,32 +216,15 @@ export default function Consolidado({ userEmail }) {
                 </div>
               </div>
 
-              {/* Estado actual */}
-              <div style={{ padding:'0 16px 12px', display:'flex', flexDirection:'column', gap:'8px' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap' }}>
-                  {ESTADOS.filter(e => e !== 'pendiente').map(estado => {
-                    const c = estadoConfig[estado]
-                    const activo = estadoActual === estado
-                    return (
-                      <button key={estado} onClick={() => cambiarEstado(prod, estado)}
-                        style={{
-                          padding:'6px 12px', borderRadius:'20px', fontSize:'12px', fontWeight:'bold',
-                          border: activo ? `2px solid ${c.color}` : `2px solid ${G.borde}`,
-                          background: activo ? c.bg : 'white',
-                          color: activo ? c.color : G.gris,
-                          cursor:'pointer'
-                        }}>
-                        {c.label}
-                      </button>
-                    )
-                  })}
+              {/* Botón Hornear todos */}
+              {!todoHorneado && (
+                <div style={{ padding:'0 16px 12px' }}>
+                  <button onClick={() => hornearTodos(prod)}
+                    style={{ width:'100%', padding:'8px', borderRadius:'8px', border:`2px solid ${G.verde}`, background:'white', color: G.verde, cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>
+                    🍞 Hornear todos
+                  </button>
                 </div>
-                {marcadoPor && (
-                  <p style={{ margin:0, fontSize:'11px', color: G.gris }}>
-                    Marcado por {marcadoPor.split('@')[0]}
-                  </p>
-                )}
-              </div>
+              )}
 
               {/* Detalle desplegable */}
               {detalleAbierto === idx && (
@@ -259,17 +232,38 @@ export default function Consolidado({ userEmail }) {
                   <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>
                     Detalle por vendedor
                   </p>
-                  {prod.detalle.map((d, i) => (
-                    <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 0', borderBottom: i < prod.detalle.length - 1 ? `1px solid ${G.borde}` : 'none' }}>
-                      <div>
-                        <p style={{ margin:0, fontSize:'14px', fontWeight:'bold', color: G.texto }}>{d.vendedor}</p>
-                        <p style={{ margin:0, fontSize:'11px', color: G.gris }}>
-                          {d.entrega === 'panaderia' ? '🏠 Panadería' : '🚚 Ruta'} · {d.pago === 'pagado' ? '✅ Pagado' : '⏳ Pendiente'}
-                        </p>
+                  {prod.detalle.map((d, i) => {
+                    const cfg = estadoConfig[d.estadoPedido]
+                    return (
+                      <div key={i} style={{ padding:'10px 0', borderBottom: i < prod.detalle.length - 1 ? `1px solid ${G.borde}` : 'none' }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+                          <div>
+                            <p style={{ margin:0, fontSize:'14px', fontWeight:'bold', color: G.texto }}>{d.vendedor}</p>
+                            <p style={{ margin:0, fontSize:'11px', color: G.gris }}>
+                              {d.entrega === 'panaderia' ? '🏠 Panadería' : '🚚 Ruta'} · {d.pago === 'pagado' ? '✅ Pagado' : '⏳ Pendiente'}
+                            </p>
+                          </div>
+                          <span style={{ fontWeight:'bold', fontSize:'16px', color: G.cafe }}>{d.cantidad}</span>
+                        </div>
+                        <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                          {['recibido', 'en produccion', 'horneado'].map(estado => {
+                            const c = estadoConfig[estado]
+                            const activo = d.estadoPedido === estado
+                            return (
+                              <button key={estado} onClick={() => cambiarEstadoPedido(d.pedidoId, prod.productoId, estado)}
+                                style={{ padding:'4px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'bold',
+                                  border: activo ? `2px solid ${c.color}` : `2px solid ${G.borde}`,
+                                  background: activo ? c.bg : 'white',
+                                  color: activo ? c.color : G.gris,
+                                  cursor:'pointer' }}>
+                                {c.label}
+                              </button>
+                            )
+                          })}
+                        </div>
                       </div>
-                      <span style={{ fontWeight:'bold', fontSize:'16px', color: G.cafe }}>{d.cantidad}</span>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
