@@ -96,30 +96,34 @@ export default function NuevoPedido({ user }) {
     setEnviando(false)
   }
 
-  const grupoActual = grupos.find(g => g.id === grupoSeleccionado)
-  const cortePasado = grupoSeleccionado ? horarioCortePasado(grupoSeleccionado) : false
   const inputStyle = { width:'100%', padding:'10px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto, fontSize:'15px' }
 
   return (
     <div style={{ maxWidth:'520px', margin:'0 auto', padding:'16px', paddingBottom:'30px' }}>
       <h3 style={{ color: G.cafe, marginBottom:'16px' }}>📋 Nuevo pedido</h3>
 
+      {/* Cuadro informativo de horarios */}
+      <div style={{ background:'white', border:`1px solid ${G.borde}`, borderLeft:`4px solid ${G.cafe}`, borderRadius:'8px', padding:'12px 14px', marginBottom:'20px' }}>
+        <p style={{ fontSize:'12px', fontWeight:'bold', color: G.cafe, textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 8px' }}>📋 Horarios de pedidos</p>
+        <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+          <p style={{ margin:0, fontSize:'13px', color: G.texto }}>🌅 <strong>3:00am – 6:00am</strong> → Entrega mismo día *</p>
+          <p style={{ margin:0, fontSize:'13px', color: G.texto }}>🌄 <strong>10:00am – 1:00pm</strong> → Entrega siguiente día mañana</p>
+          <p style={{ margin:0, fontSize:'13px', color: G.texto }}>🕐 <strong>Todo el día</strong> → Entrega siguiente día tarde</p>
+        </div>
+        <p style={{ margin:'8px 0 0', fontSize:'11px', color: G.gris }}>* Pan sin fermentación prioritario. Fermentados sujeto a disponibilidad.</p>
+      </div>
+
       <div style={{ marginBottom:'16px' }}>
         <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Grupo</p>
         <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
-          {grupos.map(g => {
-            const pasado = horarioCortePasado(g.id)
-            return (
-              <button key={g.id} translate="no" onClick={() => { setGrupoSeleccionado(g.id); setProductoSeleccionado(null); setBusqueda('') }}
-                style={{ padding:'8px 14px', borderRadius:'8px', border:`2px solid ${grupoSeleccionado === g.id ? G.cafe : G.borde}`, background: grupoSeleccionado === g.id ? G.cafe : 'white', color: grupoSeleccionado === g.id ? 'white' : pasado ? G.gris : G.texto, cursor:'pointer', fontSize:'13px', fontWeight: grupoSeleccionado === g.id ? 'bold' : 'normal', opacity: pasado ? 0.7 : 1 }}>
-                {g.nombre} {pasado ? '⏰' : ''}
-              </button>
-            )
-          })}
+          {grupos.map(g => (
+            <button key={g.id} translate="no" onClick={() => { setGrupoSeleccionado(g.id); setProductoSeleccionado(null); setBusqueda('') }}
+              style={{ padding:'8px 14px', borderRadius:'8px', border:`2px solid ${grupoSeleccionado === g.id ? G.cafe : G.borde}`, background: grupoSeleccionado === g.id ? G.cafe : 'white', color: grupoSeleccionado === g.id ? 'white' : G.texto, cursor:'pointer', fontSize:'13px', fontWeight: grupoSeleccionado === g.id ? 'bold' : 'normal' }}>
+              {g.nombre}
+            </button>
+          ))}
         </div>
-        {cortePasado && grupoActual && (
-          <p style={{ fontSize:'12px', color: G.rojo, marginTop:'8px' }}>⚠️ Horario de corte pasado ({grupoActual.horario}). Solo admins pueden autorizar.</p>
-        )}
+        {/* Horario de corte desactivado durante pruebas */}
       </div>
 
       <div style={{ marginBottom:'16px' }}>
