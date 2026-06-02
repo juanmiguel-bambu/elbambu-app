@@ -67,7 +67,7 @@ export default function NuevoPedido({ user }) {
       nuevos[existente].cantidad = Number(nuevos[existente].cantidad) + Number(cantidad)
       setItems(nuevos)
     } else {
-      setItems([...items, { productoId: prod.id, nombre: prod.nombre, medida: prod.medida, grupoId: prod.grupoId, cantidad: Number(cantidad) }])
+      setItems([...items, { productoId: prod.id, nombre: prod.nombre, medida: prod.medida, grupoId: prod.grupoId, subgrupo: prod.subgrupo || '', cantidad: Number(cantidad) }])
     }
     setProductoSeleccionado(null); setCantidad(''); setBusqueda(''); setMostrarBuscador(false)
   }

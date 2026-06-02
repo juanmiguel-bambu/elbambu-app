@@ -8,6 +8,7 @@ import NuevoPedido from './components/NuevoPedido'
 import MisPedidos from './components/MisPedidos'
 import Consolidado from './components/Consolidado'
 import Usuarios from './components/Usuarios'
+import Recetas from './components/Recetas'
 import { ADMINS, G } from './components/constants'
 
 const VAPID_PUBLIC_KEY = 'BOAhRPgcEJBXM_KsBk9TfegDoZBNPCLD6wdLT8d004bgHMdv7vJQ-nNepGusUZzWheRmq-bzG2mc6su8bawV8FM'
@@ -85,6 +86,7 @@ export default function App() {
 
   const rol = perfil.rol
   const isAdmin = rol === 'admin'
+  const puedeVerRecetas = isAdmin || rol === 'produccion'
 
   const tabs = [
     ...(rol === 'vendedor' ? [{ key:'nuevo-pedido', label:'➕ Pedido' }] : []),
@@ -92,6 +94,7 @@ export default function App() {
     ...(rol === 'admin' ? [{ key:'nuevo-pedido', label:'➕ Pedido' }] : []),
     ...(rol === 'admin' ? [{ key:'mis-pedidos', label:'📦 Mis pedidos' }] : []),
     ...(rol !== 'vendedor' ? [{ key:'consolidado', label:'📊 Consolidado' }] : []),
+    ...(puedeVerRecetas ? [{ key:'recetas', label:'🧾 Recetas' }] : []),
     ...(isAdmin ? [{ key:'catalogo', label:'📋 Catálogo' }] : []),
     ...(isAdmin ? [{ key:'usuarios', label:'👥 Usuarios' }] : []),
   ]
@@ -115,6 +118,7 @@ export default function App() {
         {tabActual === 'nuevo-pedido' && <NuevoPedido user={user} />}
         {tabActual === 'mis-pedidos' && <MisPedidos user={user} />}
         {tabActual === 'consolidado' && <Consolidado userEmail={user.email} />}
+        {tabActual === 'recetas' && puedeVerRecetas && <Recetas isAdmin={isAdmin} />}
         {tabActual === 'catalogo' && isAdmin && <Catalogo />}
         {tabActual === 'usuarios' && isAdmin && <Usuarios />}
       </div>
