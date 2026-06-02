@@ -12,7 +12,6 @@ export default function Recetas({ isAdmin }) {
   const [recetaSeleccionada, setRecetaSeleccionada] = useState(null)
   const [resultado, setResultado] = useState(null)
 
-  // Form gestión
   const [formNombre, setFormNombre] = useState('')
   const [formGrupoId, setFormGrupoId] = useState('')
   const [formSubgrupo, setFormSubgrupo] = useState('')
@@ -58,30 +57,47 @@ export default function Recetas({ isAdmin }) {
     return () => unsub()
   }, [fechaHoy])
 
+  const esUnidadPeso = (medida) => {
+    return /oz|lb|g\b|kg/i.test(medida || '')
+  }
+
   const calcular = (receta) => {
     setRecetaSeleccionada(receta)
-    let masaTotalOz = 0
+    let totalFactor = 0
     const detalle = {}
 
     pedidosHoy.forEach(pedido => {
       pedido.items?.forEach(item => {
         if ((item.subgrupo || '').toLowerCase() !== (receta.subgrupo || '').toLowerCase()) return
-        const ozMatch = item.medida?.match(/[\d.]+/)
-        const ozUnidad = ozMatch ? parseFloat(ozMatch[0]) : 0
-        const masa = ozUnidad * Number(item.cantidad)
-        masaTotalOz += masa
+        const cantidad = Number(item.cantidad)
+
+        if (esUnidadPeso(item.medida)) {
+          // Medida en oz: extraer peso y multiplicar por cantidad
+          const ozMatch = item.medida?.match(/[\d.]+/)
+          const ozUnidad = ozMatch ? parseFloat(ozMatch[0]) : 0
+          totalFactor += ozUnidad * cantidad
+        } else {
+          // Medida en unidades (lata, unidad, etc.): usar cantidad directamente
+          totalFactor += cantidad
+        }
+
         const key = `${item.nombre} (${item.medida})`
-        detalle[key] = (detalle[key] || 0) + Number(item.cantidad)
+        detalle[key] = (detalle[key] || 0) + cantidad
       })
     })
 
-    if (masaTotalOz === 0) {
+    if (totalFactor === 0) {
       setResultado({ vacio: true, receta })
       return
     }
 
     const masaBaseOz = receta.ingredientes.reduce((acc, i) => acc + Number(i.oz), 0)
-    const factor = masaTotalOz / masaBaseOz
+
+    // Para unidades de peso: factor = totalOz / masaBase
+    // Para unidades de conteo (lata): factor = totalUnidades (la receta ya es para 1 unidad)
+    const primerasMedidas = Object.keys(detalle)
+    const usaPeso = primerasMedidas.some(k => esUnidadPeso(k))
+    const factor = usaPeso ? totalFactor / masaBaseOz : totalFactor
 
     const ingredientesCalculados = receta.ingredientes.map(i => {
       const ozTotal = Number(i.oz) * factor
@@ -91,9 +107,10 @@ export default function Recetas({ isAdmin }) {
 
     setResultado({
       vacio: false, receta,
-      masaTotalOz: masaTotalOz.toFixed(2),
+      totalFactor: totalFactor.toFixed(2),
       masaBaseOz: masaBaseOz.toFixed(2),
       factor: factor.toFixed(4),
+      usaPeso,
       ingredientesCalculados, detalle
     })
   }
@@ -212,7 +229,7 @@ export default function Recetas({ isAdmin }) {
                 <div style={{ background: G.cafe, color:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px' }}>
                   <p style={{ margin:0, fontWeight:'bold', fontSize:'16px' }}>{resultado.receta.nombre}</p>
                   <p style={{ margin:'4px 0 0', fontSize:'13px', opacity:0.85 }}>
-                    Subgrupo: {resultado.receta.subgrupo} · Masa necesaria: {resultado.masaTotalOz} oz
+                    Subgrupo: {resultado.receta.subgrupo} · {resultado.usaPeso ? `Masa necesaria: ${resultado.totalFactor} oz` : `Total: ${resultado.totalFactor} unidades`}
                   </p>
                   <p style={{ margin:'2px 0 0', fontSize:'13px', opacity:0.85 }}>
                     Receta base: {resultado.masaBaseOz} oz · Factor: ×{resultado.factor}
