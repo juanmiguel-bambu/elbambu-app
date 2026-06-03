@@ -11,6 +11,7 @@ export default function Recetas({ isAdmin }) {
   const [pedidosHoy, setPedidosHoy] = useState([])
   const [recetaSeleccionada, setRecetaSeleccionada] = useState(null)
   const [resultado, setResultado] = useState(null)
+  const [turnoFiltro, setTurnoFiltro] = useState('manana')
 
   const [formNombre, setFormNombre] = useState('')
   const [formGrupoId, setFormGrupoId] = useState('')
@@ -66,18 +67,18 @@ export default function Recetas({ isAdmin }) {
     let totalFactor = 0
     const detalle = {}
 
-    pedidosHoy.forEach(pedido => {
+    const pedidosFiltrados = pedidosHoy.filter(p => (p.turnoEntrega || 'manana') === turnoFiltro)
+
+    pedidosFiltrados.forEach(pedido => {
       pedido.items?.forEach(item => {
         if ((item.subgrupo || '').toLowerCase() !== (receta.subgrupo || '').toLowerCase()) return
         const cantidad = Number(item.cantidad)
 
         if (esUnidadPeso(item.medida)) {
-          // Medida en oz: extraer peso y multiplicar por cantidad
           const ozMatch = item.medida?.match(/[\d.]+/)
           const ozUnidad = ozMatch ? parseFloat(ozMatch[0]) : 0
           totalFactor += ozUnidad * cantidad
         } else {
-          // Medida en unidades (lata, unidad, etc.): usar cantidad directamente
           totalFactor += cantidad
         }
 
@@ -92,9 +93,6 @@ export default function Recetas({ isAdmin }) {
     }
 
     const masaBaseOz = receta.ingredientes.reduce((acc, i) => acc + Number(i.oz), 0)
-
-    // Para unidades de peso: factor = totalOz / masaBase
-    // Para unidades de conteo (lata): factor = totalUnidades (la receta ya es para 1 unidad)
     const primerasMedidas = Object.keys(detalle)
     const usaPeso = primerasMedidas.some(k => esUnidadPeso(k))
     const factor = usaPeso ? totalFactor / masaBaseOz : totalFactor
@@ -110,7 +108,7 @@ export default function Recetas({ isAdmin }) {
       totalFactor: totalFactor.toFixed(2),
       masaBaseOz: masaBaseOz.toFixed(2),
       factor: factor.toFixed(4),
-      usaPeso,
+      usaPeso, turnoFiltro,
       ingredientesCalculados, detalle
     })
   }
@@ -194,6 +192,21 @@ export default function Recetas({ isAdmin }) {
           <>
             <h3 style={{ color: G.cafe, marginBottom:'16px' }}>🧮 Calcular receta</h3>
 
+            {/* Selector de turno */}
+            <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Turno</p>
+            <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
+              {[{ val:'manana', label:'🌅 Mañana' }, { val:'tarde', label:'🌇 Tarde' }].map(op => (
+                <button key={op.val} onClick={() => { setTurnoFiltro(op.val); setResultado(null); setRecetaSeleccionada(null) }}
+                  style={{ flex:1, padding:'10px 8px', borderRadius:'8px',
+                    border:`2px solid ${turnoFiltro === op.val ? G.cafe : G.borde}`,
+                    background: turnoFiltro === op.val ? G.cafe : 'white',
+                    color: turnoFiltro === op.val ? 'white' : G.texto,
+                    cursor:'pointer', fontSize:'13px', fontWeight: turnoFiltro === op.val ? 'bold' : 'normal' }}>
+                  {op.label}
+                </button>
+              ))}
+            </div>
+
             {recetas.length === 0 && (
               <p style={{ textAlign:'center', color: G.gris, marginTop:'40px', fontSize:'14px' }}>
                 No hay recetas creadas aún.{isAdmin ? ' Andá a ⚙️ Gestionar para crear una.' : ''}
@@ -220,7 +233,7 @@ export default function Recetas({ isAdmin }) {
 
             {resultado?.vacio && (
               <div style={{ background:'white', padding:'16px', borderRadius:'10px', textAlign:'center', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-                <p style={{ color: G.gris, fontSize:'14px' }}>No hay pedidos de hoy para el subgrupo <strong>{resultado.receta.subgrupo}</strong>.</p>
+                <p style={{ color: G.gris, fontSize:'14px' }}>No hay pedidos de turno <strong>{turnoFiltro === 'manana' ? 'Mañana' : 'Tarde'}</strong> para el subgrupo <strong>{resultado.receta.subgrupo}</strong>.</p>
               </div>
             )}
 
@@ -229,10 +242,10 @@ export default function Recetas({ isAdmin }) {
                 <div style={{ background: G.cafe, color:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px' }}>
                   <p style={{ margin:0, fontWeight:'bold', fontSize:'16px' }}>{resultado.receta.nombre}</p>
                   <p style={{ margin:'4px 0 0', fontSize:'13px', opacity:0.85 }}>
-                    Subgrupo: {resultado.receta.subgrupo} · {resultado.usaPeso ? `Masa necesaria: ${resultado.totalFactor} oz` : `Total: ${resultado.totalFactor} unidades`}
+                    Turno: {resultado.turnoFiltro === 'manana' ? '🌅 Mañana' : '🌇 Tarde'} · Subgrupo: {resultado.receta.subgrupo}
                   </p>
                   <p style={{ margin:'2px 0 0', fontSize:'13px', opacity:0.85 }}>
-                    Receta base: {resultado.masaBaseOz} oz · Factor: ×{resultado.factor}
+                    {resultado.usaPeso ? `Masa necesaria: ${resultado.totalFactor} oz` : `Total: ${resultado.totalFactor} unidades`} · Factor: ×{resultado.factor}
                   </p>
                 </div>
 
