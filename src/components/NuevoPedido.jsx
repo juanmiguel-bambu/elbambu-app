@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { collection, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore'
+import { collection, onSnapshot, addDoc, serverTimestamp, query, where } from 'firebase/firestore'
 import { G } from './constants'
 
 export default function NuevoPedido({ user }) {
@@ -17,6 +17,9 @@ export default function NuevoPedido({ user }) {
   const [comentario, setComentario] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [msg, setMsg] = useState('')
+  const [clientesMayoreo, setClientesMayoreo] = useState([])
+  const [clienteSeleccionado, setClienteSeleccionado] = useState(null)
+  const [esMayoreo, setEsMayoreo] = useState(false)
 
   useEffect(() => {
     const hoy = new Date()
@@ -44,6 +47,17 @@ export default function NuevoPedido({ user }) {
   }, [])
 
   useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'clientesMayoreo'),
+        where('vendedorEmail', '==', user.email),
+        where('estadoMayoreo', '==', 'aprobado')
+      ),
+      snap => setClientesMayoreo(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    )
+    return () => unsub()
+  }, [user.email])
+
+  useEffect(() => {
     if (!grupoSeleccionado) return
     const productosGrupo = productos.filter(p => p.grupoId === grupoSeleccionado)
     const subgruposGrupo = [...new Set(productosGrupo.map(p => p.subgrupo || '—'))]
@@ -56,9 +70,15 @@ export default function NuevoPedido({ user }) {
     setSubgruposAbiertos(prev => ({ ...prev, [sg]: !prev[sg] }))
   }
 
+  const getPrecio = (prod) => {
+    if (esMayoreo && clienteSeleccionado && prod.precioMayoreo > 0) return prod.precioMayoreo
+    return prod.precioUnitario || 0
+  }
+
   const agregarItem = (prod) => {
     const cant = Number(cantidades[prod.id] || 0)
     if (cant <= 0) return
+    const precio = getPrecio(prod)
     const existente = items.findIndex(i => i.productoId === prod.id)
     if (existente >= 0) {
       const nuevos = [...items]
@@ -67,7 +87,8 @@ export default function NuevoPedido({ user }) {
     } else {
       setItems([...items, {
         productoId: prod.id, nombre: prod.nombre, medida: prod.medida,
-        grupoId: prod.grupoId, subgrupo: prod.subgrupo || '', cantidad: cant
+        grupoId: prod.grupoId, subgrupo: prod.subgrupo || '', cantidad: cant,
+        precio, esMayoreo: esMayoreo && !!clienteSeleccionado
       }])
     }
     setCantidades(prev => ({ ...prev, [prod.id]: '' }))
@@ -86,10 +107,14 @@ export default function NuevoPedido({ user }) {
         items, entrega, pago, fechaEntrega, turnoEntrega,
         comentario: comentario.trim(),
         estado: 'pendiente',
+        esMayoreo: esMayoreo && !!clienteSeleccionado,
+        clienteId: clienteSeleccionado?.id || null,
+        clienteNombre: clienteSeleccionado ? `${clienteSeleccionado.nombre} ${clienteSeleccionado.apellido}` : null,
         creadoEn: serverTimestamp()
       })
       setItems([]); setTurnoEntrega('manana'); setComentario('')
       setEntrega('panaderia'); setPago('pagado'); setCantidades({})
+      setEsMayoreo(false); setClienteSeleccionado(null)
       const hoy = new Date()
       setFechaEntrega(`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`)
       setMsg('✅ Pedido enviado')
@@ -163,7 +188,7 @@ export default function NuevoPedido({ user }) {
         </div>
 
         <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Pago</p>
-        <div style={{ display:'flex', gap:'8px' }}>
+        <div style={{ display:'flex', gap:'8px', marginBottom: clientesMayoreo.length > 0 ? '12px' : '0' }}>
           {[{ val:'pagado', label:'✅ Pagado' }, { val:'pendiente', label:'⏳ Pendiente' }].map(op => (
             <button key={op.val} onClick={() => setPago(op.val)}
               style={{ flex:1, padding:'9px 8px', borderRadius:'8px', border:`2px solid ${pago === op.val ? G.cafe : G.borde}`, background: pago === op.val ? G.cafe : 'white', color: pago === op.val ? 'white' : G.texto, cursor:'pointer', fontSize:'13px', fontWeight: pago === op.val ? 'bold' : 'normal' }}>
@@ -171,6 +196,30 @@ export default function NuevoPedido({ user }) {
             </button>
           ))}
         </div>
+
+        {/* Selector cliente mayoreo — solo si tiene clientes aprobados */}
+        {clientesMayoreo.length > 0 && (
+          <div style={{ marginTop:'12px', paddingTop:'12px', borderTop:`1px solid ${G.borde}` }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+              <p style={{ fontSize:'12px', color: G.gris, margin:0 }}>¿Pedido para cliente mayoreo?</p>
+              <button onClick={() => { setEsMayoreo(!esMayoreo); setClienteSeleccionado(null) }}
+                style={{ padding:'5px 12px', borderRadius:'20px', border:`2px solid ${esMayoreo ? G.cafe : G.borde}`, background: esMayoreo ? G.cafe : 'white', color: esMayoreo ? 'white' : G.gris, cursor:'pointer', fontSize:'12px', fontWeight:'bold' }}>
+                {esMayoreo ? '✅ Sí' : 'No'}
+              </button>
+            </div>
+            {esMayoreo && (
+              <div style={{ display:'flex', flexDirection:'column', gap:'6px' }}>
+                {clientesMayoreo.map(c => (
+                  <button key={c.id} onClick={() => setClienteSeleccionado(clienteSeleccionado?.id === c.id ? null : c)}
+                    style={{ padding:'9px 12px', borderRadius:'8px', border:`2px solid ${clienteSeleccionado?.id === c.id ? G.cafe : G.borde}`, background: clienteSeleccionado?.id === c.id ? G.cafeClaro : 'white', color: G.texto, cursor:'pointer', fontSize:'13px', textAlign:'left', fontWeight: clienteSeleccionado?.id === c.id ? 'bold' : 'normal' }}>
+                    👤 {c.nombre} {c.apellido}
+                    {clienteSeleccionado?.id === c.id && <span style={{ color: G.cafe, marginLeft:'8px', fontSize:'12px' }}>✅ precio mayoreo activo</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Catálogo por subgrupos */}
@@ -184,25 +233,33 @@ export default function NuevoPedido({ user }) {
             </button>
             {subgruposAbiertos[sg] && (
               <div style={{ borderTop:`1px solid ${G.borde}` }}>
-                {productosGrupo.filter(p => (p.subgrupo || '—') === sg).map((prod, idx, arr) => (
-                  <div key={prod.id} style={{ padding:'10px 16px', borderBottom: idx < arr.length - 1 ? `1px solid ${G.borde}` : 'none', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px' }}>
-                    <div style={{ flex:1 }}>
-                      <p style={{ margin:0, fontSize:'14px', fontWeight:'bold', color: G.texto }}>{prod.nombre}</p>
-                      <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{prod.medida}</p>
+                {productosGrupo.filter(p => (p.subgrupo || '—') === sg).map((prod, idx, arr) => {
+                  const precio = getPrecio(prod)
+                  return (
+                    <div key={prod.id} style={{ padding:'10px 16px', borderBottom: idx < arr.length - 1 ? `1px solid ${G.borde}` : 'none', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px' }}>
+                      <div style={{ flex:1 }}>
+                        <p style={{ margin:0, fontSize:'14px', fontWeight:'bold', color: G.texto }}>{prod.nombre}</p>
+                        <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{prod.medida}</p>
+                        {precio > 0 && (
+                          <p style={{ margin:'2px 0 0', fontSize:'12px', color: esMayoreo && clienteSeleccionado && prod.precioMayoreo > 0 ? G.verde : G.cafe, fontWeight:'bold' }}>
+                            ${Number(precio).toFixed(2)} {esMayoreo && clienteSeleccionado && prod.precioMayoreo > 0 ? '· mayoreo' : ''}
+                          </p>
+                        )}
+                      </div>
+                      <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
+                        <input type="number" placeholder="0" min="1"
+                          value={cantidades[prod.id] || ''}
+                          onChange={e => setCantidades(prev => ({ ...prev, [prod.id]: e.target.value }))}
+                          onKeyDown={e => e.key === 'Enter' && agregarItem(prod)}
+                          style={{ width:'64px', padding:'8px', borderRadius:'8px', border:`1px solid ${G.borde}`, textAlign:'center', fontSize:'14px', background:'white', color: G.texto }} />
+                        <button onClick={() => agregarItem(prod)}
+                          style={{ padding:'8px 12px', background: G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'15px', fontWeight:'bold' }}>
+                          ➕
+                        </button>
+                      </div>
                     </div>
-                    <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
-                      <input type="number" placeholder="0" min="1"
-                        value={cantidades[prod.id] || ''}
-                        onChange={e => setCantidades(prev => ({ ...prev, [prod.id]: e.target.value }))}
-                        onKeyDown={e => e.key === 'Enter' && agregarItem(prod)}
-                        style={{ width:'64px', padding:'8px', borderRadius:'8px', border:`1px solid ${G.borde}`, textAlign:'center', fontSize:'14px', background:'white', color: G.texto }} />
-                      <button onClick={() => agregarItem(prod)}
-                        style={{ padding:'8px 12px', background: G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'15px', fontWeight:'bold' }}>
-                        ➕
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -216,23 +273,40 @@ export default function NuevoPedido({ user }) {
             Resumen — {items.length} producto{items.length !== 1 ? 's' : ''}
           </p>
 
-          {/* Resumen detalles */}
           <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'12px' }}>
             <span style={{ fontSize:'12px', background: G.cafeClaro, color: G.cafe, padding:'4px 8px', borderRadius:'20px' }}>{fechaEntrega}</span>
             <span style={{ fontSize:'12px', background: G.cafeClaro, color: G.cafe, padding:'4px 8px', borderRadius:'20px' }}>{turnoLabel}</span>
             <span style={{ fontSize:'12px', background: G.cafeClaro, color: G.cafe, padding:'4px 8px', borderRadius:'20px' }}>{entregaLabel}</span>
             <span style={{ fontSize:'12px', background: G.cafeClaro, color: G.cafe, padding:'4px 8px', borderRadius:'20px' }}>{pagoLabel}</span>
+            {clienteSeleccionado && (
+              <span style={{ fontSize:'12px', background:'#dcfce7', color: G.verde, padding:'4px 8px', borderRadius:'20px', fontWeight:'bold' }}>
+                👤 {clienteSeleccionado.nombre} {clienteSeleccionado.apellido}
+              </span>
+            )}
           </div>
 
           {items.map((item, idx) => (
             <div key={idx} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 0', borderBottom: idx < items.length - 1 ? `1px solid ${G.borde}` : 'none' }}>
               <div>
                 <p style={{ margin:0, fontWeight:'bold', fontSize:'14px' }}>{item.nombre}</p>
-                <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{item.medida} · {item.cantidad} uds</p>
+                <p style={{ margin:0, fontSize:'12px', color: G.gris }}>
+                  {item.medida} · {item.cantidad} uds
+                  {item.precio > 0 && <span style={{ color: item.esMayoreo ? G.verde : G.cafe, fontWeight:'bold' }}> · ${(item.precio * item.cantidad).toFixed(2)}</span>}
+                </p>
               </div>
               <button onClick={() => quitarItem(idx)} style={{ padding:'5px 9px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'6px', cursor:'pointer', fontSize:'12px' }}>✕</button>
             </div>
           ))}
+
+          {/* Total si hay precios */}
+          {items.some(i => i.precio > 0) && (
+            <div style={{ marginTop:'10px', paddingTop:'10px', borderTop:`2px solid ${G.borde}`, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ fontWeight:'bold', fontSize:'14px', color: G.texto }}>Total</span>
+              <span style={{ fontWeight:'bold', fontSize:'18px', color: G.cafe }}>
+                ${items.reduce((acc, i) => acc + (i.precio * i.cantidad), 0).toFixed(2)}
+              </span>
+            </div>
+          )}
 
           <p style={{ fontSize:'12px', color: G.gris, marginTop:'14px', marginBottom:'6px' }}>Comentario <span style={{ opacity:0.6 }}>(opcional)</span></p>
           <textarea value={comentario} onChange={e => setComentario(e.target.value)}
