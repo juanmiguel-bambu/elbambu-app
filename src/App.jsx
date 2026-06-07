@@ -11,6 +11,7 @@ import Usuarios from './components/Usuarios'
 import Recetas from './components/Recetas'
 import Inventario from './components/Inventario'
 import ClientesMayoreo from './components/ClientesMayoreo'
+import CierreCaja from './components/CierreCaja'
 import { ADMINS, G } from './components/constants'
 
 const VAPID_PUBLIC_KEY = 'BOAhRPgcEJBXM_KsBk9TfegDoZBNPCLD6wdLT8d004bgHMdv7vJQ-nNepGusUZzWheRmq-bzG2mc6su8bawV8FM'
@@ -92,6 +93,7 @@ export default function App() {
   const puedeVerRecetas = isAdmin || rol === 'produccion'
   const puedeVerInventario = isAdmin || rol === 'produccion'
   const puedeVerClientes = isAdmin || rol === 'vendedor'
+  const puedeVerCaja = isAdmin || rol === 'vendedor'
 
   const tabs = [
     ...(rol === 'vendedor' ? [{ key:'nuevo-pedido', label:'➕ Pedido' }] : []),
@@ -102,6 +104,7 @@ export default function App() {
     ...(puedeVerRecetas ? [{ key:'recetas', label:'🧾 Recetas' }] : []),
     ...(puedeVerInventario ? [{ key:'inventario', label:'📦 Inventario' }] : []),
     ...(puedeVerClientes ? [{ key:'clientes-mayoreo', label:'🤝 Mayoreo' }] : []),
+    ...(puedeVerCaja ? [{ key:'cierre-caja', label:'💰 Caja' }] : []),
     ...(isAdmin ? [{ key:'catalogo', label:'📋 Catálogo' }] : []),
     ...(isAdmin ? [{ key:'usuarios', label:'👥 Usuarios' }] : []),
   ]
@@ -128,6 +131,7 @@ export default function App() {
         {tabActual === 'recetas' && puedeVerRecetas && <Recetas isAdmin={isAdmin} />}
         {tabActual === 'inventario' && puedeVerInventario && <Inventario isAdmin={isAdmin} />}
         {tabActual === 'clientes-mayoreo' && puedeVerClientes && <ClientesMayoreo user={user} isAdmin={isAdmin} onBadge={setBadgeClientes} />}
+        {tabActual === 'cierre-caja' && puedeVerCaja && <CierreCaja user={user} isAdmin={isAdmin} />}
         {tabActual === 'catalogo' && isAdmin && <Catalogo />}
         {tabActual === 'usuarios' && isAdmin && <Usuarios />}
       </div>
