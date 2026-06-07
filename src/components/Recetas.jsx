@@ -1,84 +1,176 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore'
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, where } from 'firebase/firestore'
 import { G } from './constants'
 
-const UNIDADES = ['oz', 'lb', 'unidades']
+export default function Recetas({ isAdmin }) {
+  const [tab, setTab] = useState('calcular')
+  const [recetas, setRecetas] = useState([])
+  const [grupos, setGrupos] = useState([])
+  const [subgrupos, setSubgrupos] = useState([])
+  const [pedidosHoy, setPedidosHoy] = useState([])
+  const [inventario, setInventario] = useState([])
+  const [recetaSeleccionada, setRecetaSeleccionada] = useState(null)
+  const [resultado, setResultado] = useState(null)
+  const [turnoFiltro, setTurnoFiltro] = useState('manana')
+  const [confirmando, setConfirmando] = useState(false)
+  const [msgConfirm, setMsgConfirm] = useState('')
 
-export default function Inventario({ isAdmin }) {
-  const [materias, setMaterias] = useState([])
-  const [ingredientesRecetas, setIngredientesRecetas] = useState([])
-  const [tab, setTab] = useState('stock')
-  const [mostrarForm, setMostrarForm] = useState(false)
-  const [editandoId, setEditandoId] = useState(null)
   const [formNombre, setFormNombre] = useState('')
-  const [formUnidad, setFormUnidad] = useState('oz')
-  const [formStockMax, setFormStockMax] = useState('')
-  const [formStockInicial, setFormStockInicial] = useState('')
+  const [formGrupoId, setFormGrupoId] = useState('')
+  const [formSubgrupo, setFormSubgrupo] = useState('')
+  const [formIngredientes, setFormIngredientes] = useState([{ nombre: '', oz: '' }])
+  const [editandoId, setEditandoId] = useState(null)
   const [guardando, setGuardando] = useState(false)
   const [msg, setMsg] = useState('')
+  const [mostrarForm, setMostrarForm] = useState(false)
   const [confirmEliminar, setConfirmEliminar] = useState(null)
-  const [entradaId, setEntradaId] = useState(null)
-  const [entradaCantidad, setEntradaCantidad] = useState('')
-  const [entradaMsg, setEntradaMsg] = useState('')
-  const [mostrarSug, setMostrarSug] = useState(false)
+  const [mostrarSugIng, setMostrarSugIng] = useState({})
 
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'inventario'), snap => {
-      const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      lista.sort((a, b) => a.nombre.localeCompare(b.nombre))
-      setMaterias(lista)
-    })
-    return () => unsub()
-  }, [])
+  const hoy = new Date()
+  const fechaHoy = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'recetas'), snap => {
-      const nombres = new Set()
-      snap.docs.forEach(d => {
-        const receta = d.data()
-        receta.ingredientes?.forEach(i => {
-          if (i.nombre?.trim()) nombres.add(i.nombre.trim())
-        })
-      })
-      setIngredientesRecetas([...nombres].sort())
+      setRecetas(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     })
     return () => unsub()
   }, [])
 
-  const sugerenciasFiltradas = ingredientesRecetas.filter(n =>
-    formNombre.trim() !== '' &&
-    n.toLowerCase().includes(formNombre.toLowerCase()) &&
-    !materias.some(m => m.nombre.toLowerCase() === n.toLowerCase())
-  )
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'grupos'), snap => {
+      const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      lista.sort((a, b) => (a.orden || 0) - (b.orden || 0))
+      setGrupos(lista)
+    })
+    return () => unsub()
+  }, [])
 
-  const porcentaje = (m) => {
-    if (!m.stockMaximo || m.stockMaximo === 0) return 0
-    return Math.min(100, Math.round((m.stockActual / m.stockMaximo) * 100))
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'productos'), snap => {
+      const subs = [...new Set(snap.docs.map(d => d.data().subgrupo).filter(Boolean))]
+      setSubgrupos(subs.sort())
+    })
+    return () => unsub()
+  }, [])
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'pedidos'), where('fechaEntrega', '==', fechaHoy)),
+      snap => setPedidosHoy(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    )
+    return () => unsub()
+  }, [fechaHoy])
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'inventario'), snap => {
+      setInventario(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    })
+    return () => unsub()
+  }, [])
+
+  const esUnidadPeso = (medida) => /oz|lb|g\b|kg/i.test(medida || '')
+
+  const calcular = (receta) => {
+    setRecetaSeleccionada(receta)
+    setMsgConfirm('')
+    let totalFactor = 0
+    const detalle = {}
+
+    const pedidosFiltrados = pedidosHoy.filter(p => (p.turnoEntrega || 'manana') === turnoFiltro)
+
+    pedidosFiltrados.forEach(pedido => {
+      pedido.items?.forEach(item => {
+        if ((item.subgrupo || '').toLowerCase() !== (receta.subgrupo || '').toLowerCase()) return
+        const cantidad = Number(item.cantidad)
+        if (esUnidadPeso(item.medida)) {
+          const ozMatch = item.medida?.match(/[\d.]+/)
+          const ozUnidad = ozMatch ? parseFloat(ozMatch[0]) : 0
+          totalFactor += ozUnidad * cantidad
+        } else {
+          totalFactor += cantidad
+        }
+        const key = `${item.nombre} (${item.medida})`
+        detalle[key] = (detalle[key] || 0) + cantidad
+      })
+    })
+
+    if (totalFactor === 0) {
+      setResultado({ vacio: true, receta })
+      return
+    }
+
+    const masaBaseOz = receta.ingredientes.reduce((acc, i) => acc + Number(i.oz), 0)
+    const primerasMedidas = Object.keys(detalle)
+    const usaPeso = primerasMedidas.some(k => esUnidadPeso(k))
+    const factor = usaPeso ? totalFactor / masaBaseOz : totalFactor
+
+    const ingredientesCalculados = receta.ingredientes.map(i => {
+      const ozTotal = Number(i.oz) * factor
+      const lbTotal = ozTotal / 16
+      return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: lbTotal.toFixed(3) }
+    })
+
+    setResultado({
+      vacio: false, receta,
+      totalFactor: totalFactor.toFixed(2),
+      masaBaseOz: masaBaseOz.toFixed(2),
+      factor: factor.toFixed(4),
+      usaPeso, turnoFiltro,
+      ingredientesCalculados, detalle
+    })
   }
 
-  const enAlerta = (m) => porcentaje(m) <= 25
+  const confirmarProduccion = async () => {
+    if (!resultado || resultado.vacio) return
+    setConfirmando(true)
+    setMsgConfirm('')
+    try {
+      const actualizados = []
+      const noEncontrados = []
+      for (const ing of resultado.ingredientesCalculados) {
+        const materia = inventario.find(m => m.nombre.toLowerCase().trim() === ing.nombre.toLowerCase().trim())
+        if (!materia) { noEncontrados.push(ing.nombre); continue }
+        const ozUsadas = parseFloat(ing.oz)
+        let descuento = 0
+        if (materia.unidad === 'oz') {
+          descuento = ozUsadas
+        } else if (materia.unidad === 'lb') {
+          descuento = ozUsadas / 16
+        } else {
+          noEncontrados.push(ing.nombre); continue
+        }
+        const nuevoStock = Math.max(0, (materia.stockActual || 0) - descuento)
+        await updateDoc(doc(db, 'inventario', materia.id), { stockActual: parseFloat(nuevoStock.toFixed(3)) })
+        actualizados.push(ing.nombre)
+      }
+      let msgFinal = `✅ Producción confirmada. ${actualizados.length} ingrediente${actualizados.length !== 1 ? 's' : ''} descontado${actualizados.length !== 1 ? 's' : ''} del inventario.`
+      if (noEncontrados.length > 0) msgFinal += ` Sin match en inventario: ${noEncontrados.join(', ')}.`
+      setMsgConfirm(msgFinal)
+    } catch (e) {
+      setMsgConfirm('⚠️ Error al confirmar producción.')
+      console.error(e)
+    }
+    setConfirmando(false)
+  }
 
-  const guardar = async () => {
-    if (!formNombre.trim()) { setMsg('⚠️ Ingresá el nombre'); return }
-    if (!formStockMax || Number(formStockMax) <= 0) { setMsg('⚠️ Ingresá el stock máximo'); return }
+  const guardarReceta = async () => {
+    if (!formNombre.trim() || !formGrupoId || !formSubgrupo.trim()) { setMsg('⚠️ Completá nombre, grupo y subgrupo'); return }
+    const ingValidos = formIngredientes.filter(i => i.nombre.trim() && i.oz)
+    if (ingValidos.length === 0) { setMsg('⚠️ Agregá al menos un ingrediente'); return }
     setGuardando(true)
+    const datos = {
+      nombre: formNombre.trim(),
+      grupoId: formGrupoId,
+      subgrupo: formSubgrupo.trim(),
+      ingredientes: ingValidos.map(i => ({ nombre: i.nombre.trim(), oz: parseFloat(i.oz) }))
+    }
     if (editandoId) {
-      await updateDoc(doc(db, 'inventario', editandoId), {
-        nombre: formNombre.trim(),
-        unidad: formUnidad,
-        stockMaximo: Number(formStockMax)
-      })
-      setMsg('Actualizado ✅')
+      await updateDoc(doc(db, 'recetas', editandoId), datos)
+      setMsg('Receta actualizada ✅')
     } else {
-      await addDoc(collection(db, 'inventario'), {
-        nombre: formNombre.trim(),
-        unidad: formUnidad,
-        stockMaximo: Number(formStockMax),
-        stockActual: Number(formStockInicial) || 0,
-        creadoEn: new Date()
-      })
-      setMsg('Agregado ✅')
+      await addDoc(collection(db, 'recetas'), { ...datos, creadoEn: new Date() })
+      setMsg('Receta guardada ✅')
     }
     resetForm()
     setTimeout(() => setMsg(''), 2000)
@@ -86,37 +178,44 @@ export default function Inventario({ isAdmin }) {
   }
 
   const resetForm = () => {
-    setFormNombre(''); setFormUnidad('oz'); setFormStockMax(''); setFormStockInicial('')
-    setEditandoId(null); setMostrarForm(false); setMostrarSug(false)
+    setFormNombre(''); setFormGrupoId(''); setFormSubgrupo('')
+    setFormIngredientes([{ nombre: '', oz: '' }])
+    setEditandoId(null); setMostrarForm(false); setMostrarSugIng({})
   }
 
-  const iniciarEdicion = (m) => {
-    setFormNombre(m.nombre); setFormUnidad(m.unidad); setFormStockMax(m.stockMaximo.toString())
-    setEditandoId(m.id); setMostrarForm(true); setTab('gestion')
+  const iniciarEdicion = (r) => {
+    setFormNombre(r.nombre); setFormGrupoId(r.grupoId); setFormSubgrupo(r.subgrupo)
+    setFormIngredientes(r.ingredientes.map(i => ({ nombre: i.nombre, oz: i.oz.toString() })))
+    setEditandoId(r.id); setMostrarForm(true)
   }
 
   const eliminar = async (id) => {
-    await deleteDoc(doc(db, 'inventario', id))
+    await deleteDoc(doc(db, 'recetas', id))
     setConfirmEliminar(null)
   }
 
-  const registrarEntrada = async (m) => {
-    const cant = Number(entradaCantidad)
-    if (!cant || cant <= 0) { setEntradaMsg('⚠️ Ingresá una cantidad válida'); return }
-    await updateDoc(doc(db, 'inventario', m.id), {
-      stockActual: (m.stockActual || 0) + cant
-    })
-    setEntradaId(null); setEntradaCantidad(''); setEntradaMsg('')
+  const agregarIngrediente = () => setFormIngredientes([...formIngredientes, { nombre: '', oz: '' }])
+  const quitarIngrediente = (idx) => setFormIngredientes(formIngredientes.filter((_, i) => i !== idx))
+  const actualizarIngrediente = (idx, campo, valor) => {
+    const nuevos = [...formIngredientes]
+    nuevos[idx][campo] = valor
+    setFormIngredientes(nuevos)
+  }
+
+  const sugerenciasParaIng = (idx) => {
+    const texto = formIngredientes[idx]?.nombre || ''
+    if (!texto.trim()) return []
+    return inventario
+      .map(m => m.nombre)
+      .filter(n => n.toLowerCase().includes(texto.toLowerCase()))
+      .sort()
   }
 
   const inputStyle = { width:'100%', padding:'10px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto, fontSize:'14px' }
 
-  const alertas = materias.filter(m => enAlerta(m) && m.stockActual > 0)
-  const sinStock = materias.filter(m => m.stockActual === 0)
-
   const subTabs = [
-    { key:'stock', label:'📊 Stock' },
-    ...(isAdmin ? [{ key:'gestion', label:'⚙️ Gestión' }] : [])
+    { key:'calcular', label:'🧮 Calcular' },
+    ...(isAdmin ? [{ key:'gestionar', label:'⚙️ Gestionar' }] : [])
   ]
 
   return (
@@ -125,7 +224,7 @@ export default function Inventario({ isAdmin }) {
       <div style={{ background:'white', position:'sticky', top:'52px', zIndex:90, borderBottom:`1px solid ${G.borde}` }}>
         <div style={{ display:'flex' }}>
           {subTabs.map(t => (
-            <button key={t.key} onClick={() => { setTab(t.key); setMostrarForm(false) }}
+            <button key={t.key} onClick={() => { setTab(t.key); setResultado(null); setMsgConfirm('') }}
               style={{ flex:1, padding:'13px 16px', border:'none', background:'transparent',
                 color: tab === t.key ? G.cafe : G.gris,
                 fontWeight: tab === t.key ? 'bold' : 'normal',
@@ -139,191 +238,219 @@ export default function Inventario({ isAdmin }) {
 
       <div style={{ padding:'16px' }}>
 
-        {/* ── TAB STOCK ── */}
-        {tab === 'stock' && (
+        {tab === 'calcular' && (
           <>
-            <h3 style={{ color: G.cafe, marginBottom:'16px' }}>📦 Inventario Materias Primas</h3>
+            <h3 style={{ color: G.cafe, marginBottom:'16px' }}>🧮 Calcular receta</h3>
 
-            {(alertas.length > 0 || sinStock.length > 0) && (
-              <div style={{ background:'#fff3cd', border:'1px solid #ffc107', borderRadius:'10px', padding:'12px 16px', marginBottom:'16px' }}>
-                <p style={{ margin:'0 0 8px', fontWeight:'bold', fontSize:'13px', color:'#856404' }}>⚠️ Alertas de stock</p>
-                {sinStock.map(m => (
-                  <p key={m.id} style={{ margin:'2px 0', fontSize:'13px', color: G.rojo }}>
-                    🔴 <strong>{m.nombre}</strong> — Sin stock
-                  </p>
-                ))}
-                {alertas.map(m => (
-                  <p key={m.id} style={{ margin:'2px 0', fontSize:'13px', color:'#856404' }}>
-                    🟡 <strong>{m.nombre}</strong> — {m.stockActual} {m.unidad} ({porcentaje(m)}% del máximo)
-                  </p>
-                ))}
-              </div>
-            )}
+            <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Turno</p>
+            <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
+              {[{ val:'manana', label:'🌅 Mañana' }, { val:'tarde', label:'🌇 Tarde' }].map(op => (
+                <button key={op.val} onClick={() => { setTurnoFiltro(op.val); setResultado(null); setRecetaSeleccionada(null); setMsgConfirm('') }}
+                  style={{ flex:1, padding:'10px 8px', borderRadius:'8px',
+                    border:`2px solid ${turnoFiltro === op.val ? G.cafe : G.borde}`,
+                    background: turnoFiltro === op.val ? G.cafe : 'white',
+                    color: turnoFiltro === op.val ? 'white' : G.texto,
+                    cursor:'pointer', fontSize:'13px', fontWeight: turnoFiltro === op.val ? 'bold' : 'normal' }}>
+                  {op.label}
+                </button>
+              ))}
+            </div>
 
-            {materias.length === 0 && (
+            {recetas.length === 0 && (
               <p style={{ textAlign:'center', color: G.gris, marginTop:'40px', fontSize:'14px' }}>
-                No hay materias primas registradas.{isAdmin ? ' Andá a ⚙️ Gestión para agregar.' : ''}
+                No hay recetas creadas aún.{isAdmin ? ' Andá a ⚙️ Gestionar para crear una.' : ''}
               </p>
             )}
 
-            {materias.map(m => {
-              const pct = porcentaje(m)
-              const alerta = enAlerta(m)
-              const barColor = pct === 0 ? G.rojo : alerta ? '#ffc107' : G.verde
-
-              return (
-                <div key={m.id} style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'10px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px' }}>
-                    <div style={{ flex:1 }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
-                        {alerta && <span style={{ fontSize:'14px' }}>⚠️</span>}
-                        <p style={{ margin:0, fontWeight:'bold', fontSize:'15px', color: G.texto }}>{m.nombre}</p>
-                      </div>
-                      <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>
-                        Stock máx: {m.stockMaximo} {m.unidad}
-                      </p>
-                    </div>
-                    <div style={{ textAlign:'right' }}>
-                      <span style={{ fontWeight:'bold', fontSize:'18px', color: pct === 0 ? G.rojo : alerta ? '#856404' : G.cafe }}>
-                        {m.stockActual}
-                      </span>
-                      <span style={{ fontSize:'13px', color: G.gris }}> {m.unidad}</span>
-                    </div>
-                  </div>
-
-                  <div style={{ background: G.borde, borderRadius:'4px', height:'6px', marginBottom:'10px' }}>
-                    <div style={{ width:`${pct}%`, background: barColor, borderRadius:'4px', height:'6px', transition:'width 0.3s' }} />
-                  </div>
-
-                  {isAdmin && (
-                    entradaId === m.id ? (
-                      <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
-                        <input type="number" placeholder={`Cantidad en ${m.unidad}`} value={entradaCantidad}
-                          onChange={e => setEntradaCantidad(e.target.value)}
-                          style={{ ...inputStyle, flex:1, padding:'8px' }} />
-                        <button onClick={() => registrarEntrada(m)}
-                          style={{ padding:'8px 14px', background: G.verde, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>
-                          ✅
-                        </button>
-                        <button onClick={() => { setEntradaId(null); setEntradaCantidad(''); setEntradaMsg('') }}
-                          style={{ padding:'8px 12px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'13px' }}>
-                          ✕
-                        </button>
-                      </div>
-                    ) : (
-                      <button onClick={() => { setEntradaId(m.id); setEntradaCantidad('') }}
-                        style={{ width:'100%', padding:'7px', background: G.cafeClaro, color: G.cafe, border:`1px solid ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>
-                        ➕ Registrar entrada
-                      </button>
-                    )
-                  )}
-                  {entradaMsg && entradaId === m.id && (
-                    <p style={{ color: G.rojo, fontSize:'12px', margin:'4px 0 0' }}>{entradaMsg}</p>
-                  )}
+            {recetas.length > 0 && (
+              <>
+                <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Seleccionar receta</p>
+                <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'20px' }}>
+                  {recetas.map(r => (
+                    <button key={r.id} onClick={() => calcular(r)}
+                      style={{ padding:'10px 16px', borderRadius:'8px',
+                        border:`2px solid ${recetaSeleccionada?.id === r.id ? G.cafe : G.borde}`,
+                        background: recetaSeleccionada?.id === r.id ? G.cafe : 'white',
+                        color: recetaSeleccionada?.id === r.id ? 'white' : G.texto,
+                        cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>
+                      {r.nombre}
+                    </button>
+                  ))}
                 </div>
-              )
-            })}
+              </>
+            )}
+
+            {resultado?.vacio && (
+              <div style={{ background:'white', padding:'16px', borderRadius:'10px', textAlign:'center', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+                <p style={{ color: G.gris, fontSize:'14px' }}>No hay pedidos de turno <strong>{turnoFiltro === 'manana' ? 'Mañana' : 'Tarde'}</strong> para el subgrupo <strong>{resultado.receta.subgrupo}</strong>.</p>
+              </div>
+            )}
+
+            {resultado && !resultado.vacio && (
+              <>
+                <div style={{ background: G.cafe, color:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px' }}>
+                  <p style={{ margin:0, fontWeight:'bold', fontSize:'16px' }}>{resultado.receta.nombre}</p>
+                  <p style={{ margin:'4px 0 0', fontSize:'13px', opacity:0.85 }}>
+                    Turno: {resultado.turnoFiltro === 'manana' ? '🌅 Mañana' : '🌇 Tarde'} · Subgrupo: {resultado.receta.subgrupo}
+                  </p>
+                  <p style={{ margin:'2px 0 0', fontSize:'13px', opacity:0.85 }}>
+                    {resultado.usaPeso ? `Masa necesaria: ${resultado.totalFactor} oz` : `Total: ${resultado.totalFactor} unidades`} · Factor: ×{resultado.factor}
+                  </p>
+                </div>
+
+                <div style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+                  <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>Pedidos incluidos</p>
+                  {Object.entries(resultado.detalle).map(([nombre, cant]) => (
+                    <div key={nombre} style={{ display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:`1px solid ${G.borde}`, fontSize:'13px' }}>
+                      <span style={{ color: G.texto }}>{nombre}</span>
+                      <span style={{ fontWeight:'bold', color: G.cafe }}>{cant} uds</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+                  <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>Ingredientes</p>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr auto auto', gap:'0 12px', alignItems:'center' }}>
+                    <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px' }}>Ingrediente</span>
+                    <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px', textAlign:'right' }}>Oz</span>
+                    <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px', textAlign:'right' }}>Lb</span>
+                    {resultado.ingredientesCalculados.map((ing, idx) => (
+                      <>
+                        <span key={`n${idx}`} style={{ fontSize:'14px', color: G.texto, padding:'6px 0', borderTop:`1px solid ${G.borde}` }}>{ing.nombre}</span>
+                        <span key={`o${idx}`} style={{ fontSize:'14px', fontWeight:'bold', color: G.cafe, padding:'6px 0', borderTop:`1px solid ${G.borde}`, textAlign:'right' }}>{ing.oz}</span>
+                        <span key={`l${idx}`} style={{ fontSize:'14px', fontWeight:'bold', color: G.texto, padding:'6px 0', borderTop:`1px solid ${G.borde}`, textAlign:'right' }}>{ing.lb}</span>
+                      </>
+                    ))}
+                  </div>
+                </div>
+
+                {msgConfirm ? (
+                  <div style={{ background: msgConfirm.includes('⚠️') ? '#fee2e2' : '#dcfce7', padding:'14px 16px', borderRadius:'10px', fontSize:'13px', color: msgConfirm.includes('⚠️') ? G.rojo : G.verde }}>
+                    {msgConfirm}
+                  </div>
+                ) : (
+                  <button onClick={confirmarProduccion} disabled={confirmando}
+                    style={{ width:'100%', padding:'14px', background: G.verde, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px' }}>
+                    {confirmando ? 'Confirmando...' : '✅ Confirmar producción'}
+                  </button>
+                )}
+              </>
+            )}
           </>
         )}
 
-        {/* ── TAB GESTIÓN ── */}
-        {tab === 'gestion' && isAdmin && (
+        {tab === 'gestionar' && isAdmin && (
           <>
-            <h3 style={{ color: G.cafe, marginBottom:'16px' }}>⚙️ Gestión de materias primas</h3>
+            <h3 style={{ color: G.cafe, marginBottom:'16px' }}>⚙️ Gestionar recetas</h3>
 
             {!mostrarForm && (
               <button onClick={() => setMostrarForm(true)}
                 style={{ width:'100%', padding:'12px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px', marginBottom:'20px' }}>
-                ➕ Nueva materia prima
+                ➕ Nueva receta
               </button>
             )}
 
             {mostrarForm && (
               <div style={{ background:'white', padding:'16px', borderRadius:'10px', marginBottom:'20px', boxShadow:'0 1px 6px rgba(0,0,0,0.08)', borderTop:`3px solid ${G.cafe}` }}>
-                <p style={{ fontWeight:'bold', color: G.cafe, marginBottom:'14px' }}>{editandoId ? '✏️ Editar materia prima' : '➕ Nueva materia prima'}</p>
+                <p style={{ fontWeight:'bold', color: G.cafe, marginBottom:'14px' }}>{editandoId ? '✏️ Editar receta' : '➕ Nueva receta'}</p>
 
-                <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Nombre</p>
-                <div style={{ position:'relative', marginBottom:'12px' }}>
-                  <input value={formNombre}
-                    onChange={e => { setFormNombre(e.target.value); setMostrarSug(true) }}
-                    onFocus={() => setMostrarSug(true)}
-                    onBlur={() => setTimeout(() => setMostrarSug(false), 150)}
-                    placeholder="Ej: Harina Suave"
-                    autoCorrect="off" autoCapitalize="off" spellCheck="false"
-                    style={inputStyle} />
-                  {mostrarSug && sugerenciasFiltradas.length > 0 && (
-                    <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:`1px solid ${G.borde}`, borderRadius:'8px', zIndex:50, boxShadow:'0 4px 12px rgba(0,0,0,0.12)', maxHeight:'180px', overflowY:'auto' }}>
-                      {sugerenciasFiltradas.map(s => (
-                        <div key={s} onClick={() => { setFormNombre(s); setMostrarSug(false) }}
-                          style={{ padding:'10px 14px', cursor:'pointer', borderBottom:`1px solid ${G.borde}`, fontSize:'14px', color: G.texto }}
-                          onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
-                          onMouseLeave={e => e.currentTarget.style.background = 'white'}>
-                          {s}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Nombre de la receta</p>
+                <input value={formNombre} onChange={e => setFormNombre(e.target.value)} placeholder="Ej: Masa de Pan Menudo"
+                  style={{ ...inputStyle, marginBottom:'12px' }} />
 
-                <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Unidad</p>
-                <div style={{ display:'flex', gap:'8px', marginBottom:'12px' }}>
-                  {UNIDADES.map(u => (
-                    <button key={u} onClick={() => setFormUnidad(u)}
-                      style={{ flex:1, padding:'9px', borderRadius:'8px', border:`2px solid ${formUnidad === u ? G.cafe : G.borde}`, background: formUnidad === u ? G.cafe : 'white', color: formUnidad === u ? 'white' : G.texto, cursor:'pointer', fontSize:'13px', fontWeight: formUnidad === u ? 'bold' : 'normal' }}>
-                      {u}
+                <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Grupo</p>
+                <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'12px' }}>
+                  {grupos.map(g => (
+                    <button key={g.id} onClick={() => setFormGrupoId(g.id)}
+                      style={{ padding:'7px 12px', borderRadius:'8px', border:`2px solid ${formGrupoId === g.id ? G.cafe : G.borde}`, background: formGrupoId === g.id ? G.cafe : 'white', color: formGrupoId === g.id ? 'white' : G.gris, cursor:'pointer', fontSize:'13px' }}>
+                      {g.nombre}
                     </button>
                   ))}
                 </div>
 
-                <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Stock máximo ({formUnidad})</p>
-                <input type="number" value={formStockMax} onChange={e => setFormStockMax(e.target.value)}
-                  placeholder="Ej: 500"
-                  style={{ ...inputStyle, marginBottom:'12px' }} min="0" step="0.01" />
+                <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Subgrupo vinculado</p>
+                <select value={formSubgrupo} onChange={e => setFormSubgrupo(e.target.value)}
+                  style={{ ...inputStyle, marginBottom:'16px' }}>
+                  <option value=''>Seleccioná un subgrupo...</option>
+                  {subgrupos.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
 
-                {!editandoId && (
-                  <>
-                    <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Stock inicial ({formUnidad}) <span style={{ opacity:0.6 }}>(opcional)</span></p>
-                    <input type="number" value={formStockInicial} onChange={e => setFormStockInicial(e.target.value)}
-                      placeholder="0"
-                      style={{ ...inputStyle, marginBottom:'16px' }} min="0" step="0.01" />
-                  </>
-                )}
+                <p style={{ fontSize:'12px', color: G.gris, marginBottom:'8px' }}>Ingredientes (en onzas)</p>
+                {formIngredientes.map((ing, idx) => {
+                  const sugs = sugerenciasParaIng(idx)
+                  const mostrar = mostrarSugIng[idx] && sugs.length > 0
+                  return (
+                    <div key={idx} style={{ marginBottom:'8px' }}>
+                      <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
+                        <div style={{ position:'relative', flex:2 }}>
+                          <input placeholder="Ingrediente" value={ing.nombre}
+                            onChange={e => { actualizarIngrediente(idx, 'nombre', e.target.value); setMostrarSugIng(prev => ({ ...prev, [idx]: true })) }}
+                            onFocus={() => setMostrarSugIng(prev => ({ ...prev, [idx]: true }))}
+                            onBlur={() => setTimeout(() => setMostrarSugIng(prev => ({ ...prev, [idx]: false })), 150)}
+                            autoCorrect="off" autoCapitalize="off" spellCheck="false"
+                            style={{ ...inputStyle, marginBottom:0 }} />
+                          {mostrar && (
+                            <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:`1px solid ${G.borde}`, borderRadius:'8px', zIndex:50, boxShadow:'0 4px 12px rgba(0,0,0,0.12)', maxHeight:'160px', overflowY:'auto' }}>
+                              {sugs.map(s => (
+                                <div key={s} onClick={() => { actualizarIngrediente(idx, 'nombre', s); setMostrarSugIng(prev => ({ ...prev, [idx]: false })) }}
+                                  style={{ padding:'9px 14px', cursor:'pointer', borderBottom:`1px solid ${G.borde}`, fontSize:'14px', color: G.texto }}
+                                  onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
+                                  onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                                  {s}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <input type="number" placeholder="Oz" value={ing.oz}
+                          onChange={e => actualizarIngrediente(idx, 'oz', e.target.value)} min="0" step="0.01"
+                          style={{ ...inputStyle, flex:1, marginBottom:0 }} />
+                        {formIngredientes.length > 1 && (
+                          <button onClick={() => quitarIngrediente(idx)}
+                            style={{ padding:'10px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'13px', flexShrink:0 }}>✕</button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+                <button onClick={agregarIngrediente}
+                  style={{ width:'100%', padding:'9px', background: G.cafeClaro, color: G.cafe, border:`1px dashed ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px', marginBottom:'16px' }}>
+                  ➕ Agregar ingrediente
+                </button>
 
                 {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize:'13px', marginBottom:'10px' }}>{msg}</p>}
                 <div style={{ display:'flex', gap:'8px' }}>
                   <button onClick={resetForm} style={{ flex:1, padding:'11px', background: G.borde, color: G.texto, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'14px' }}>Cancelar</button>
-                  <button onClick={guardar} disabled={guardando} style={{ flex:2, padding:'11px', background: G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold', fontSize:'14px' }}>
-                    {guardando ? 'Guardando...' : editandoId ? 'Guardar cambios' : 'Agregar'}
+                  <button onClick={guardarReceta} disabled={guardando} style={{ flex:2, padding:'11px', background: G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold', fontSize:'14px' }}>
+                    {guardando ? 'Guardando...' : editandoId ? 'Guardar cambios' : 'Guardar receta'}
                   </button>
                 </div>
               </div>
             )}
 
-            {materias.length === 0 && !mostrarForm && (
-              <p style={{ textAlign:'center', color: G.gris, marginTop:'40px', fontSize:'14px' }}>No hay materias primas registradas.</p>
+            {recetas.length === 0 && !mostrarForm && (
+              <p style={{ textAlign:'center', color: G.gris, marginTop:'40px', fontSize:'14px' }}>No hay recetas creadas aún.</p>
             )}
 
-            {materias.map(m => (
-              <div key={m.id} style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'10px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-                {confirmEliminar === m.id ? (
+            {recetas.map(r => (
+              <div key={r.id} style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'10px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+                {confirmEliminar === r.id ? (
                   <div>
-                    <p style={{ margin:'0 0 10px', fontSize:'14px', color: G.rojo }}>⚠️ ¿Eliminar "{m.nombre}"?</p>
+                    <p style={{ margin:'0 0 10px', fontSize:'14px', color: G.rojo }}>⚠️ ¿Eliminar "{r.nombre}"?</p>
                     <div style={{ display:'flex', gap:'8px' }}>
                       <button onClick={() => setConfirmEliminar(null)} style={{ flex:1, padding:'8px', background: G.borde, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>Cancelar</button>
-                      <button onClick={() => eliminar(m.id)} style={{ flex:1, padding:'8px', background: G.rojo, color:'white', border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>Sí, eliminar</button>
+                      <button onClick={() => eliminar(r.id)} style={{ flex:1, padding:'8px', background: G.rojo, color:'white', border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>Sí, eliminar</button>
                     </div>
                   </div>
                 ) : (
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                     <div>
-                      <p style={{ margin:0, fontWeight:'bold', fontSize:'15px', color: G.texto }}>{m.nombre}</p>
-                      <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>
-                        {m.stockActual} / {m.stockMaximo} {m.unidad}
-                      </p>
+                      <p style={{ margin:0, fontWeight:'bold', fontSize:'15px', color: G.texto }}>{r.nombre}</p>
+                      <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>{r.subgrupo} · {r.ingredientes?.length} ingredientes</p>
                     </div>
                     <div style={{ display:'flex', gap:'6px' }}>
-                      <button onClick={() => iniciarEdicion(m)} style={{ padding:'7px 12px', background: G.amarilloClaro, color: G.amarillo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✏️</button>
-                      <button onClick={() => setConfirmEliminar(m.id)} style={{ padding:'7px 12px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✕</button>
+                      <button onClick={() => iniciarEdicion(r)} style={{ padding:'7px 12px', background: G.amarilloClaro, color: G.amarillo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✏️</button>
+                      <button onClick={() => setConfirmEliminar(r.id)} style={{ padding:'7px 12px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✕</button>
                     </div>
                   </div>
                 )}
