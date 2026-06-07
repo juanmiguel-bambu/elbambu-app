@@ -7,6 +7,7 @@ const UNIDADES = ['oz', 'lb', 'unidades']
 
 export default function Inventario({ isAdmin }) {
   const [materias, setMaterias] = useState([])
+  const [ingredientesRecetas, setIngredientesRecetas] = useState([])
   const [tab, setTab] = useState('stock')
   const [mostrarForm, setMostrarForm] = useState(false)
   const [editandoId, setEditandoId] = useState(null)
@@ -20,6 +21,7 @@ export default function Inventario({ isAdmin }) {
   const [entradaId, setEntradaId] = useState(null)
   const [entradaCantidad, setEntradaCantidad] = useState('')
   const [entradaMsg, setEntradaMsg] = useState('')
+  const [mostrarSug, setMostrarSug] = useState(false)
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'inventario'), snap => {
@@ -29,6 +31,26 @@ export default function Inventario({ isAdmin }) {
     })
     return () => unsub()
   }, [])
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'recetas'), snap => {
+      const nombres = new Set()
+      snap.docs.forEach(d => {
+        const receta = d.data()
+        receta.ingredientes?.forEach(i => {
+          if (i.nombre?.trim()) nombres.add(i.nombre.trim())
+        })
+      })
+      setIngredientesRecetas([...nombres].sort())
+    })
+    return () => unsub()
+  }, [])
+
+  const sugerenciasFiltradas = ingredientesRecetas.filter(n =>
+    formNombre.trim() !== '' &&
+    n.toLowerCase().includes(formNombre.toLowerCase()) &&
+    !materias.some(m => m.nombre.toLowerCase() === n.toLowerCase())
+  )
 
   const porcentaje = (m) => {
     if (!m.stockMaximo || m.stockMaximo === 0) return 0
@@ -65,7 +87,7 @@ export default function Inventario({ isAdmin }) {
 
   const resetForm = () => {
     setFormNombre(''); setFormUnidad('oz'); setFormStockMax(''); setFormStockInicial('')
-    setEditandoId(null); setMostrarForm(false)
+    setEditandoId(null); setMostrarForm(false); setMostrarSug(false)
   }
 
   const iniciarEdicion = (m) => {
@@ -122,7 +144,6 @@ export default function Inventario({ isAdmin }) {
           <>
             <h3 style={{ color: G.cafe, marginBottom:'16px' }}>📦 Inventario Materias Primas</h3>
 
-            {/* Alertas */}
             {(alertas.length > 0 || sinStock.length > 0) && (
               <div style={{ background:'#fff3cd', border:'1px solid #ffc107', borderRadius:'10px', padding:'12px 16px', marginBottom:'16px' }}>
                 <p style={{ margin:'0 0 8px', fontWeight:'bold', fontSize:'13px', color:'#856404' }}>⚠️ Alertas de stock</p>
@@ -170,12 +191,10 @@ export default function Inventario({ isAdmin }) {
                     </div>
                   </div>
 
-                  {/* Barra de progreso */}
                   <div style={{ background: G.borde, borderRadius:'4px', height:'6px', marginBottom:'10px' }}>
                     <div style={{ width:`${pct}%`, background: barColor, borderRadius:'4px', height:'6px', transition:'width 0.3s' }} />
                   </div>
 
-                  {/* Botón registrar entrada */}
                   {isAdmin && (
                     entradaId === m.id ? (
                       <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
@@ -224,9 +243,27 @@ export default function Inventario({ isAdmin }) {
                 <p style={{ fontWeight:'bold', color: G.cafe, marginBottom:'14px' }}>{editandoId ? '✏️ Editar materia prima' : '➕ Nueva materia prima'}</p>
 
                 <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Nombre</p>
-                <input value={formNombre} onChange={e => setFormNombre(e.target.value)}
-                  placeholder="Ej: Harina Suave"
-                  style={{ ...inputStyle, marginBottom:'12px' }} />
+                <div style={{ position:'relative', marginBottom:'12px' }}>
+                  <input value={formNombre}
+                    onChange={e => { setFormNombre(e.target.value); setMostrarSug(true) }}
+                    onFocus={() => setMostrarSug(true)}
+                    onBlur={() => setTimeout(() => setMostrarSug(false), 150)}
+                    placeholder="Ej: Harina Suave"
+                    autoCorrect="off" autoCapitalize="off" spellCheck="false"
+                    style={inputStyle} />
+                  {mostrarSug && sugerenciasFiltradas.length > 0 && (
+                    <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:`1px solid ${G.borde}`, borderRadius:'8px', zIndex:50, boxShadow:'0 4px 12px rgba(0,0,0,0.12)', maxHeight:'180px', overflowY:'auto' }}>
+                      {sugerenciasFiltradas.map(s => (
+                        <div key={s} onClick={() => { setFormNombre(s); setMostrarSug(false) }}
+                          style={{ padding:'10px 14px', cursor:'pointer', borderBottom:`1px solid ${G.borde}`, fontSize:'14px', color: G.texto }}
+                          onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
+                          onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                          {s}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
                 <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Unidad</p>
                 <div style={{ display:'flex', gap:'8px', marginBottom:'12px' }}>
