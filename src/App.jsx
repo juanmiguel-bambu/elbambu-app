@@ -131,10 +131,10 @@ export default function App() {
         {tabActual === 'catalogo' && isAdmin && <Catalogo />}
         {tabActual === 'usuarios' && isAdmin && <Usuarios />}
       </div>
-      <div style={{ position:'fixed', bottom:0, left:0, right:0, background:'white', borderTop:`1px solid ${G.borde}`, display:'flex' }}>
+      <div style={{ position:'fixed', bottom:0, left:0, right:0, background:'white', borderTop:`1px solid ${G.borde}`, display:'flex', overflowX:'auto', scrollbarWidth:'none' }}>
         {tabs.map(t => (
           <button key={t.key} onClick={() => { setTab(t.key); limpiarBadge(); if (t.key === 'clientes-mayoreo') setBadgeClientes(0) }}
-            style={{ flex:1, padding:'12px 4px', border:'none', background: tabActual === t.key ? G.cafeClaro : 'white', color: tabActual === t.key ? G.cafe : G.gris, fontWeight: tabActual === t.key ? 'bold' : 'normal', cursor:'pointer', fontSize:'11px', position:'relative' }}>
+            style={{ flexShrink:0, padding:'12px 14px', border:'none', background: tabActual === t.key ? G.cafeClaro : 'white', color: tabActual === t.key ? G.cafe : G.gris, fontWeight: tabActual === t.key ? 'bold' : 'normal', cursor:'pointer', fontSize:'11px', position:'relative', whiteSpace:'nowrap' }}>
             {t.label}
             {t.key === 'clientes-mayoreo' && badgeClientes > 0 && (
               <span style={{ position:'absolute', top:'6px', right:'4px', background: G.rojo, color:'white', borderRadius:'10px', fontSize:'10px', fontWeight:'bold', padding:'1px 5px', minWidth:'16px', textAlign:'center' }}>
