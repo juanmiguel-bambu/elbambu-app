@@ -10,6 +10,7 @@ import Consolidado from './components/Consolidado'
 import Usuarios from './components/Usuarios'
 import Recetas from './components/Recetas'
 import Inventario from './components/Inventario'
+import ClientesMayoreo from './components/ClientesMayoreo'
 import { ADMINS, G } from './components/constants'
 
 const VAPID_PUBLIC_KEY = 'BOAhRPgcEJBXM_KsBk9TfegDoZBNPCLD6wdLT8d004bgHMdv7vJQ-nNepGusUZzWheRmq-bzG2mc6su8bawV8FM'
@@ -50,6 +51,7 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [perfil, setPerfil] = useState(null)
   const [tab, setTab] = useState('nuevo-pedido')
+  const [badgeClientes, setBadgeClientes] = useState(0)
 
   useEffect(() => {
     limpiarBadge()
@@ -89,6 +91,7 @@ export default function App() {
   const isAdmin = rol === 'admin'
   const puedeVerRecetas = isAdmin || rol === 'produccion'
   const puedeVerInventario = isAdmin || rol === 'produccion'
+  const puedeVerClientes = isAdmin || rol === 'vendedor'
 
   const tabs = [
     ...(rol === 'vendedor' ? [{ key:'nuevo-pedido', label:'➕ Pedido' }] : []),
@@ -98,6 +101,7 @@ export default function App() {
     ...(rol !== 'vendedor' ? [{ key:'consolidado', label:'📊 Consolidado' }] : []),
     ...(puedeVerRecetas ? [{ key:'recetas', label:'🧾 Recetas' }] : []),
     ...(puedeVerInventario ? [{ key:'inventario', label:'📦 Inventario' }] : []),
+    ...(puedeVerClientes ? [{ key:'clientes-mayoreo', label:'🤝 Mayoreo' }] : []),
     ...(isAdmin ? [{ key:'catalogo', label:'📋 Catálogo' }] : []),
     ...(isAdmin ? [{ key:'usuarios', label:'👥 Usuarios' }] : []),
   ]
@@ -123,14 +127,20 @@ export default function App() {
         {tabActual === 'consolidado' && <Consolidado userEmail={user.email} />}
         {tabActual === 'recetas' && puedeVerRecetas && <Recetas isAdmin={isAdmin} />}
         {tabActual === 'inventario' && puedeVerInventario && <Inventario isAdmin={isAdmin} />}
+        {tabActual === 'clientes-mayoreo' && puedeVerClientes && <ClientesMayoreo user={user} isAdmin={isAdmin} onBadge={setBadgeClientes} />}
         {tabActual === 'catalogo' && isAdmin && <Catalogo />}
         {tabActual === 'usuarios' && isAdmin && <Usuarios />}
       </div>
       <div style={{ position:'fixed', bottom:0, left:0, right:0, background:'white', borderTop:`1px solid ${G.borde}`, display:'flex' }}>
         {tabs.map(t => (
-          <button key={t.key} onClick={() => { setTab(t.key); limpiarBadge() }}
-            style={{ flex:1, padding:'12px 4px', border:'none', background: tabActual === t.key ? G.cafeClaro : 'white', color: tabActual === t.key ? G.cafe : G.gris, fontWeight: tabActual === t.key ? 'bold' : 'normal', cursor:'pointer', fontSize:'11px' }}>
+          <button key={t.key} onClick={() => { setTab(t.key); limpiarBadge(); if (t.key === 'clientes-mayoreo') setBadgeClientes(0) }}
+            style={{ flex:1, padding:'12px 4px', border:'none', background: tabActual === t.key ? G.cafeClaro : 'white', color: tabActual === t.key ? G.cafe : G.gris, fontWeight: tabActual === t.key ? 'bold' : 'normal', cursor:'pointer', fontSize:'11px', position:'relative' }}>
             {t.label}
+            {t.key === 'clientes-mayoreo' && badgeClientes > 0 && (
+              <span style={{ position:'absolute', top:'6px', right:'4px', background: G.rojo, color:'white', borderRadius:'10px', fontSize:'10px', fontWeight:'bold', padding:'1px 5px', minWidth:'16px', textAlign:'center' }}>
+                {badgeClientes}
+              </span>
+            )}
           </button>
         ))}
       </div>
