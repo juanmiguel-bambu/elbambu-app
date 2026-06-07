@@ -4,6 +4,11 @@ import { doc, setDoc, collection, onSnapshot, updateDoc } from 'firebase/firesto
 import { G } from './constants'
 
 const ROLES = ['admin', 'vendedor', 'produccion']
+const CATEGORIAS_VENDEDOR = [
+  { val: 'rutero', label: '🚚 Rutero' },
+  { val: 'punto_fijo', label: '🏪 Punto fijo' },
+  { val: 'en_linea', label: '💻 En línea' },
+]
 
 const rolLabel = (rol) => {
   if (rol === 'admin') return { label: '🔑 Admin', bg: '#fef9c3', color: '#854d0e' }
@@ -12,11 +17,19 @@ const rolLabel = (rol) => {
   return { label: rol, bg: '#f3f4f6', color: '#888' }
 }
 
+const categoriaLabel = (cat) => {
+  if (cat === 'rutero') return '🚚 Rutero'
+  if (cat === 'punto_fijo') return '🏪 Punto fijo'
+  if (cat === 'en_linea') return '💻 En línea'
+  return ''
+}
+
 export default function Usuarios() {
   const [usuarios, setUsuarios] = useState([])
   const [nombre, setNombre] = useState('')
   const [email, setEmail] = useState('')
   const [rol, setRol] = useState('vendedor')
+  const [categoriaVendedor, setCategoriaVendedor] = useState('rutero')
   const [guardando, setGuardando] = useState(false)
   const [msg, setMsg] = useState('')
   const [editando, setEditando] = useState(null)
@@ -35,35 +48,38 @@ export default function Usuarios() {
   const guardar = async () => {
     if (!nombre.trim() || !email.trim()) { setMsg('⚠️ Completá nombre y email'); return }
     setGuardando(true)
+    const datos = {
+      nombre: nombre.trim(),
+      rol,
+      activo: true,
+      ...(rol === 'vendedor' ? { categoriaVendedor } : { categoriaVendedor: null })
+    }
     if (editando) {
-      await updateDoc(doc(db, 'usuarios', editando.id), {
-        nombre: nombre.trim(), rol, activo: true
-      })
+      await updateDoc(doc(db, 'usuarios', editando.id), datos)
       setEditando(null); setMsg('Usuario actualizado ✅')
     } else {
       const id = email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_')
       await setDoc(doc(db, 'usuarios', id), {
-        nombre: nombre.trim(),
+        ...datos,
         email: email.trim().toLowerCase(),
-        rol,
-        activo: true,
         creadoEn: new Date()
       })
       setMsg('Usuario agregado ✅')
     }
-    setNombre(''); setEmail(''); setRol('vendedor')
+    setNombre(''); setEmail(''); setRol('vendedor'); setCategoriaVendedor('rutero')
     setTimeout(() => { setMsg(''); setMostrarForm(false) }, 2000)
     setGuardando(false)
   }
 
   const iniciarEdicion = (u) => {
     setEditando(u); setNombre(u.nombre); setEmail(u.email); setRol(u.rol)
+    setCategoriaVendedor(u.categoriaVendedor || 'rutero')
     setMostrarForm(true); window.scrollTo(0, 0)
   }
 
   const cancelar = () => {
     setEditando(null); setNombre(''); setEmail(''); setRol('vendedor')
-    setMostrarForm(false)
+    setCategoriaVendedor('rutero'); setMostrarForm(false)
   }
 
   const toggleActivo = async (u) => {
@@ -84,7 +100,6 @@ export default function Usuarios() {
     <div style={{ maxWidth: '520px', margin: '0 auto', padding: '16px' }}>
       <h3 style={{ color: G.cafe, marginBottom: '16px' }}>👥 Usuarios</h3>
 
-      {/* Botón agregar / formulario */}
       {!mostrarForm ? (
         <button onClick={() => setMostrarForm(true)}
           style={{ width: '100%', padding: '12px', background: G.cafe, color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px', marginBottom: '20px' }}>
@@ -110,7 +125,6 @@ export default function Usuarios() {
             </p>
           )}
 
-          {/* Selector de rol */}
           <p style={{ fontSize: '12px', color: G.gris, marginBottom: '8px' }}>Rol</p>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
             {ROLES.map(r => {
@@ -123,6 +137,20 @@ export default function Usuarios() {
               )
             })}
           </div>
+
+          {rol === 'vendedor' && (
+            <>
+              <p style={{ fontSize: '12px', color: G.gris, marginBottom: '8px' }}>Categoría de vendedor</p>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
+                {CATEGORIAS_VENDEDOR.map(c => (
+                  <button key={c.val} onClick={() => setCategoriaVendedor(c.val)}
+                    style={{ padding: '8px 14px', borderRadius: '8px', border: `2px solid ${categoriaVendedor === c.val ? G.cafe : G.borde}`, background: categoriaVendedor === c.val ? G.cafe : 'white', color: categoriaVendedor === c.val ? 'white' : G.gris, cursor: 'pointer', fontSize: '13px', fontWeight: categoriaVendedor === c.val ? 'bold' : 'normal' }}>
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
           {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize: '13px', marginBottom: '10px' }}>{msg}</p>}
 
@@ -139,7 +167,6 @@ export default function Usuarios() {
         </div>
       )}
 
-      {/* Lista activos */}
       <p style={{ fontSize: '12px', fontWeight: 'bold', color: G.gris, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>
         Activos ({activos.length})
       </p>
@@ -150,18 +177,12 @@ export default function Usuarios() {
           <div key={u.id} style={{ background: 'white', padding: '14px 16px', borderRadius: '10px', marginBottom: '10px', boxShadow: '0 1px 4px rgba(0,0,0,0.07)' }}>
             {confirmDesactivar === u.id ? (
               <div>
-                <p style={{ margin: '0 0 10px', fontSize: '14px', color: G.rojo }}>
-                  ⚠️ ¿Desactivar a "{u.nombre}"?
-                </p>
+                <p style={{ margin: '0 0 10px', fontSize: '14px', color: G.rojo }}>⚠️ ¿Desactivar a "{u.nombre}"?</p>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button onClick={() => setConfirmDesactivar(null)}
-                    style={{ flex: 1, padding: '8px', background: G.borde, border: 'none', borderRadius: '7px', cursor: 'pointer', fontSize: '13px' }}>
-                    Cancelar
-                  </button>
+                    style={{ flex: 1, padding: '8px', background: G.borde, border: 'none', borderRadius: '7px', cursor: 'pointer', fontSize: '13px' }}>Cancelar</button>
                   <button onClick={() => toggleActivo(u)}
-                    style={{ flex: 1, padding: '8px', background: G.rojo, color: 'white', border: 'none', borderRadius: '7px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>
-                    Sí, desactivar
-                  </button>
+                    style={{ flex: 1, padding: '8px', background: G.rojo, color: 'white', border: 'none', borderRadius: '7px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Sí, desactivar</button>
                 </div>
               </div>
             ) : (
@@ -169,7 +190,12 @@ export default function Usuarios() {
                 <div style={{ flex: 1 }}>
                   <p style={{ margin: 0, fontWeight: 'bold', fontSize: '15px', color: G.texto }}>{u.nombre}</p>
                   <p style={{ margin: '2px 0 4px', fontSize: '12px', color: G.gris }}>{u.email}</p>
-                  <span style={{ padding: '3px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: 'bold', background: bg, color }}>{label}</span>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    <span style={{ padding: '3px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: 'bold', background: bg, color }}>{label}</span>
+                    {u.rol === 'vendedor' && u.categoriaVendedor && (
+                      <span style={{ padding: '3px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: 'bold', background: G.cafeClaro, color: G.cafe }}>{categoriaLabel(u.categoriaVendedor)}</span>
+                    )}
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', marginLeft: '10px' }}>
                   <button onClick={() => iniciarEdicion(u)}
@@ -184,12 +210,9 @@ export default function Usuarios() {
       })}
 
       {activos.length === 0 && !mostrarForm && (
-        <p style={{ textAlign: 'center', color: G.gris, fontSize: '14px', marginTop: '20px' }}>
-          No hay usuarios registrados aún.
-        </p>
+        <p style={{ textAlign: 'center', color: G.gris, fontSize: '14px', marginTop: '20px' }}>No hay usuarios registrados aún.</p>
       )}
 
-      {/* Lista inactivos */}
       {inactivos.length > 0 && (
         <div style={{ marginTop: '24px', opacity: 0.65 }}>
           <p style={{ fontSize: '12px', fontWeight: 'bold', color: G.gris, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>
@@ -205,9 +228,7 @@ export default function Usuarios() {
                   <span style={{ padding: '3px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: 'bold', background: bg, color }}>{label}</span>
                 </div>
                 <button onClick={() => toggleActivo(u)}
-                  style={{ padding: '6px 12px', background: '#dcfce7', color: G.verde, border: 'none', borderRadius: '7px', cursor: 'pointer', fontSize: '12px' }}>
-                  Activar
-                </button>
+                  style={{ padding: '6px 12px', background: '#dcfce7', color: G.verde, border: 'none', borderRadius: '7px', cursor: 'pointer', fontSize: '12px' }}>Activar</button>
               </div>
             )
           })}

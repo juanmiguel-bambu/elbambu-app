@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { auth, db } from './firebase'
 import { onAuthStateChanged, signOut } from 'firebase/auth'
-import { doc, setDoc, getDoc } from 'firebase/firestore'
+import { doc, setDoc, getDoc, onSnapshot } from 'firebase/firestore'
 import Login from './components/Login'
 import Catalogo from './components/Catalogo'
 import NuevoPedido from './components/NuevoPedido'
@@ -12,6 +12,7 @@ import Recetas from './components/Recetas'
 import Inventario from './components/Inventario'
 import ClientesMayoreo from './components/ClientesMayoreo'
 import CierreCaja from './components/CierreCaja'
+import VendedorSemana from './components/VendedorSemana'
 import { ADMINS, G } from './components/constants'
 
 const VAPID_PUBLIC_KEY = 'BOAhRPgcEJBXM_KsBk9TfegDoZBNPCLD6wdLT8d004bgHMdv7vJQ-nNepGusUZzWheRmq-bzG2mc6su8bawV8FM'
@@ -53,6 +54,8 @@ export default function App() {
   const [perfil, setPerfil] = useState(null)
   const [tab, setTab] = useState('nuevo-pedido')
   const [badgeClientes, setBadgeClientes] = useState(0)
+  const [bannerSemana, setBannerSemana] = useState(false)
+  const [configSemana, setConfigSemana] = useState(false)
 
   useEffect(() => {
     limpiarBadge()
@@ -64,6 +67,20 @@ export default function App() {
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onVisibility)
     }
+  }, [])
+
+  useEffect(() => {
+    // Escuchar config del vendedor de la semana
+    const unsub = onSnapshot(doc(db, 'config', 'vendedorSemana'), snap => {
+      if (snap.exists()) {
+        const activo = snap.data().activo || false
+        setConfigSemana(activo)
+        // Mostrar banner si es viernes y está activo
+        const esViernes = new Date().getDay() === 5
+        if (activo && esViernes) setBannerSemana(true)
+      }
+    })
+    return () => unsub()
   }, [])
 
   useEffect(() => {
@@ -94,6 +111,7 @@ export default function App() {
   const puedeVerInventario = isAdmin || rol === 'produccion'
   const puedeVerClientes = isAdmin || rol === 'vendedor'
   const puedeVerCaja = isAdmin || rol === 'vendedor'
+  const puedeVerSemana = isAdmin || rol === 'vendedor'
 
   const tabs = [
     ...(rol === 'vendedor' ? [{ key:'nuevo-pedido', label:'➕ Pedido' }] : []),
@@ -105,6 +123,7 @@ export default function App() {
     ...(puedeVerInventario ? [{ key:'inventario', label:'📦 Inventario' }] : []),
     ...(puedeVerClientes ? [{ key:'clientes-mayoreo', label:'🤝 Mayoreo' }] : []),
     ...(puedeVerCaja ? [{ key:'cierre-caja', label:'💰 Caja' }] : []),
+    ...(puedeVerSemana ? [{ key:'vendedor-semana', label:'🏆 Semana' }] : []),
     ...(isAdmin ? [{ key:'catalogo', label:'📋 Catálogo' }] : []),
     ...(isAdmin ? [{ key:'usuarios', label:'👥 Usuarios' }] : []),
   ]
@@ -114,6 +133,26 @@ export default function App() {
 
   return (
     <div translate="no" style={{ minHeight:'100vh', background: G.cafeClaro, paddingBottom:'70px' }}>
+
+      {/* Banner viernes — vendedor de la semana */}
+      {bannerSemana && (
+        <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:200, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
+          <div style={{ background:'white', borderRadius:'16px', padding:'24px', maxWidth:'380px', width:'100%', textAlign:'center', boxShadow:'0 8px 32px rgba(0,0,0,0.2)' }}>
+            <p style={{ fontSize:'40px', margin:'0 0 8px' }}>🏆</p>
+            <p style={{ fontWeight:'bold', fontSize:'20px', color: G.cafe, margin:'0 0 4px' }}>¡Vendedor de la semana!</p>
+            <p style={{ fontSize:'13px', color: G.gris, margin:'0 0 20px' }}>Resultados de esta semana en El Bambú</p>
+            <button onClick={() => { setBannerSemana(false); setTab('vendedor-semana') }}
+              style={{ width:'100%', padding:'12px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px', marginBottom:'10px' }}>
+              🏆 Ver ganadores
+            </button>
+            <button onClick={() => setBannerSemana(false)}
+              style={{ width:'100%', padding:'10px', background: G.cafeClaro, color: G.cafe, border:'none', borderRadius:'10px', cursor:'pointer', fontSize:'14px' }}>
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={{ background: G.cafe, color:'white', padding:'14px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', position:'sticky', top:0, zIndex:100 }}>
         <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
           <img src="/icon-192.png" alt="" style={{ width:'28px', height:'28px', borderRadius:'6px' }} />
@@ -124,6 +163,7 @@ export default function App() {
           <button onClick={() => signOut(auth)} style={{ background:'rgba(255,255,255,0.2)', color:'white', border:'none', padding:'6px 12px', borderRadius:'6px', cursor:'pointer', fontSize:'13px' }}>Salir</button>
         </div>
       </div>
+
       <div>
         {tabActual === 'nuevo-pedido' && <NuevoPedido user={user} />}
         {tabActual === 'mis-pedidos' && <MisPedidos user={user} />}
@@ -132,9 +172,11 @@ export default function App() {
         {tabActual === 'inventario' && puedeVerInventario && <Inventario isAdmin={isAdmin} />}
         {tabActual === 'clientes-mayoreo' && puedeVerClientes && <ClientesMayoreo user={user} isAdmin={isAdmin} onBadge={setBadgeClientes} />}
         {tabActual === 'cierre-caja' && puedeVerCaja && <CierreCaja user={user} isAdmin={isAdmin} />}
+        {tabActual === 'vendedor-semana' && puedeVerSemana && <VendedorSemana isAdmin={isAdmin} />}
         {tabActual === 'catalogo' && isAdmin && <Catalogo />}
         {tabActual === 'usuarios' && isAdmin && <Usuarios />}
       </div>
+
       <div style={{ position:'fixed', bottom:0, left:0, right:0, background:'white', borderTop:`1px solid ${G.borde}`, display:'flex', overflowX:'auto', scrollbarWidth:'none' }}>
         {tabs.map(t => (
           <button key={t.key} onClick={() => { setTab(t.key); limpiarBadge(); if (t.key === 'clientes-mayoreo') setBadgeClientes(0) }}
