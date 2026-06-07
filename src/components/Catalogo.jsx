@@ -21,6 +21,7 @@ export default function Catalogo() {
   const [editando, setEditando] = useState(null)
   const [mostrarForm, setMostrarForm] = useState(false)
   const [verGestionGrupos, setVerGestionGrupos] = useState(false)
+  const [verListaPrecios, setVerListaPrecios] = useState(false)
   const [menuProducto, setMenuProducto] = useState(null)
   const [confirmEliminarProducto, setConfirmEliminarProducto] = useState(null)
 
@@ -90,8 +91,27 @@ export default function Catalogo() {
   const subgruposActivos = [...new Set(activos.map(p => p.subgrupo || '—'))]
 
   const inputStyle = { width:'100%', padding:'10px', marginBottom:'10px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto, fontSize:'15px' }
-
   const formatPrecio = (p) => p ? `$${Number(p).toFixed(2)}` : null
+
+  const compartirWhatsApp = () => {
+    const fecha = new Date().toLocaleDateString('es-SV', { day:'2-digit', month:'2-digit', year:'numeric' })
+    let texto = `🥖 *Lista de Precios El Bambú*\n📅 ${fecha}\n\n`
+    grupos.forEach(g => {
+      const productosGrupo = productos.filter(p => p.activo && p.grupoId === g.id && p.precioUnitario > 0)
+      if (productosGrupo.length === 0) return
+      texto += `*${g.nombre.toUpperCase()}*\n`
+      const subs = [...new Set(productosGrupo.map(p => p.subgrupo || '—'))]
+      subs.forEach(sg => {
+        if (sg !== '—') texto += `\n_${sg}_\n`
+        productosGrupo.filter(p => (p.subgrupo || '—') === sg).forEach(p => {
+          texto += `• ${p.nombre} (${p.medida}) — $${Number(p.precioUnitario).toFixed(2)}\n`
+        })
+      })
+      texto += '\n'
+    })
+    texto += '📍 Panadería El Bambú — Santa Tecla'
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank')
+  }
 
   const ProductoCard = ({ p }) => (
     <div style={{ background:'white', padding:'12px 14px', borderRadius:'10px', marginBottom:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
@@ -119,14 +139,10 @@ export default function Catalogo() {
             <p style={{ margin:0, fontSize:'12px', color: G.gris, marginTop:'2px' }}>{p.medida}</p>
             <div style={{ display:'flex', gap:'8px', marginTop:'4px', flexWrap:'wrap' }}>
               {formatPrecio(p.precioUnitario) && (
-                <span style={{ fontSize:'12px', color: G.cafe, fontWeight:'bold' }}>
-                  {formatPrecio(p.precioUnitario)} unit.
-                </span>
+                <span style={{ fontSize:'12px', color: G.cafe, fontWeight:'bold' }}>{formatPrecio(p.precioUnitario)} unit.</span>
               )}
               {formatPrecio(p.precioMayoreo) && (
-                <span style={{ fontSize:'12px', color: G.gris }}>
-                  {formatPrecio(p.precioMayoreo)} may.
-                </span>
+                <span style={{ fontSize:'12px', color: G.gris }}>{formatPrecio(p.precioMayoreo)} may.</span>
               )}
             </div>
           </div>
@@ -140,6 +156,64 @@ export default function Catalogo() {
   )
 
   if (verGestionGrupos) return <GestionGrupos onVolver={() => setVerGestionGrupos(false)} />
+
+  if (verListaPrecios) return (
+    <div style={{ maxWidth:'520px', margin:'0 auto' }}>
+      <div style={{ background:'white', position:'sticky', top:'52px', zIndex:90, borderBottom:`1px solid ${G.borde}`, padding:'12px 16px', display:'flex', alignItems:'center', gap:'12px' }}>
+        <button onClick={() => setVerListaPrecios(false)}
+          style={{ padding:'7px 12px', background: G.cafeClaro, color: G.cafe, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'14px', fontWeight:'bold' }}>
+          ← Volver
+        </button>
+        <span style={{ fontWeight:'bold', color: G.cafe, fontSize:'16px', flex:1 }}>📋 Lista de precios</span>
+        <button onClick={compartirWhatsApp}
+          style={{ padding:'8px 14px', background:'#25D366', color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>
+          📲 WhatsApp
+        </button>
+      </div>
+
+      <div style={{ padding:'16px' }}>
+        <div style={{ background: G.cafe, color:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'20px', textAlign:'center' }}>
+          <p style={{ margin:0, fontWeight:'bold', fontSize:'18px' }}>🥖 Panadería El Bambú</p>
+          <p style={{ margin:'4px 0 0', fontSize:'13px', opacity:0.85 }}>Lista de precios · {new Date().toLocaleDateString('es-SV', { day:'2-digit', month:'long', year:'numeric' })}</p>
+        </div>
+
+        {grupos.map(g => {
+          const productosGrupo = productos.filter(p => p.activo && p.grupoId === g.id && p.precioUnitario > 0)
+          if (productosGrupo.length === 0) return null
+          const subs = [...new Set(productosGrupo.map(p => p.subgrupo || '—'))]
+          return (
+            <div key={g.id} style={{ marginBottom:'24px' }}>
+              <div style={{ background: G.cafeClaro, padding:'8px 14px', borderRadius:'8px', marginBottom:'12px', borderLeft:`4px solid ${G.cafe}` }}>
+                <p style={{ margin:0, fontWeight:'bold', fontSize:'13px', color: G.cafe, textTransform:'uppercase', letterSpacing:'1px' }}>{g.nombre}</p>
+              </div>
+              {subs.map(sg => (
+                <div key={sg} style={{ marginBottom:'12px' }}>
+                  {sg !== '—' && (
+                    <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'6px', paddingLeft:'2px' }}>{sg}</p>
+                  )}
+                  {productosGrupo.filter(p => (p.subgrupo || '—') === sg).map(p => (
+                    <div key={p.id} style={{ background:'white', padding:'11px 14px', borderRadius:'8px', marginBottom:'6px', display:'flex', justifyContent:'space-between', alignItems:'center', boxShadow:'0 1px 3px rgba(0,0,0,0.06)' }}>
+                      <div>
+                        <p style={{ margin:0, fontWeight:'bold', fontSize:'14px', color: G.texto }}>{p.nombre}</p>
+                        <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{p.medida}</p>
+                      </div>
+                      <span style={{ fontWeight:'bold', fontSize:'16px', color: G.cafe }}>${Number(p.precioUnitario).toFixed(2)}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )
+        })}
+
+        {productos.filter(p => p.activo && p.precioUnitario > 0).length === 0 && (
+          <p style={{ textAlign:'center', color: G.gris, marginTop:'40px', fontSize:'14px' }}>
+            No hay productos con precio registrado aún.
+          </p>
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <div style={{ maxWidth:'520px', margin:'0 auto' }}>
@@ -162,12 +236,18 @@ export default function Catalogo() {
           </div>
         ) : (
           <>
-            {!mostrarForm ? (
+            <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
               <button onClick={() => { setGrupoId(tabGrupo || ''); setMostrarForm(true) }}
-                style={{ width:'100%', padding:'12px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px', marginBottom:'20px' }}>
+                style={{ flex:1, padding:'12px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px' }}>
                 ➕ Agregar producto
               </button>
-            ) : (
+              <button onClick={() => setVerListaPrecios(true)}
+                style={{ padding:'12px 14px', background: G.cafeClaro, color: G.cafe, border:`1px solid ${G.cafe}`, borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'13px' }}>
+                📋 Precios
+              </button>
+            </div>
+
+            {mostrarForm && (
               <div style={{ background:'white', padding:'16px', borderRadius:'10px', marginBottom:'20px', boxShadow:'0 1px 6px rgba(0,0,0,0.08)', borderTop: editando ? `3px solid #854d0e` : `3px solid ${G.cafe}` }}>
                 <p style={{ fontWeight:'bold', marginBottom:'14px', color: editando ? '#854d0e' : G.cafe, fontSize:'15px' }}>{editando ? `✏️ Editando: ${editando.nombre}` : '➕ Nuevo producto'}</p>
                 <div style={{ display:'flex', gap:'6px', marginBottom:'12px', flexWrap:'wrap' }}>
@@ -190,7 +270,6 @@ export default function Catalogo() {
                 </div>
                 <input placeholder="Nombre del producto" value={nombre} onChange={e => setNombre(e.target.value)} autoCorrect="off" autoCapitalize="off" spellCheck="false" style={inputStyle} />
                 <input placeholder="Medida / peso" value={medida} onChange={e => setMedida(e.target.value)} autoCorrect="off" autoCapitalize="off" spellCheck="false" style={inputStyle} />
-
                 <div style={{ display:'flex', gap:'8px' }}>
                   <div style={{ flex:1 }}>
                     <p style={{ fontSize:'12px', color: G.gris, margin:'0 0 4px' }}>Precio unitario ($)</p>
@@ -203,7 +282,6 @@ export default function Catalogo() {
                       style={{ ...inputStyle, marginBottom:'14px' }} />
                   </div>
                 </div>
-
                 {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize:'13px', marginBottom:'10px' }}>{msg}</p>}
                 <div style={{ display:'flex', gap:'8px' }}>
                   <button onClick={cancelarEdicion} style={{ flex:1, padding:'11px', background: G.borde, color: G.texto, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'14px' }}>Cancelar</button>
@@ -211,6 +289,7 @@ export default function Catalogo() {
                 </div>
               </div>
             )}
+
             {subgruposActivos.map((sg, idx) => (
               <div key={sg} style={{ marginBottom:'20px' }}>
                 <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px', paddingLeft:'2px' }}>{sg}</p>
