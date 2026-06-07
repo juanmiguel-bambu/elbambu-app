@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, where } from 'firebase/firestore'
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, where, getDocs } from 'firebase/firestore'
 import { G } from './constants'
 
 export default function Recetas({ isAdmin }) {
@@ -9,9 +9,12 @@ export default function Recetas({ isAdmin }) {
   const [grupos, setGrupos] = useState([])
   const [subgrupos, setSubgrupos] = useState([])
   const [pedidosHoy, setPedidosHoy] = useState([])
+  const [inventario, setInventario] = useState([])
   const [recetaSeleccionada, setRecetaSeleccionada] = useState(null)
   const [resultado, setResultado] = useState(null)
   const [turnoFiltro, setTurnoFiltro] = useState('manana')
+  const [confirmando, setConfirmando] = useState(false)
+  const [msgConfirm, setMsgConfirm] = useState('')
 
   const [formNombre, setFormNombre] = useState('')
   const [formGrupoId, setFormGrupoId] = useState('')
@@ -58,12 +61,18 @@ export default function Recetas({ isAdmin }) {
     return () => unsub()
   }, [fechaHoy])
 
-  const esUnidadPeso = (medida) => {
-    return /oz|lb|g\b|kg/i.test(medida || '')
-  }
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'inventario'), snap => {
+      setInventario(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    })
+    return () => unsub()
+  }, [])
+
+  const esUnidadPeso = (medida) => /oz|lb|g\b|kg/i.test(medida || '')
 
   const calcular = (receta) => {
     setRecetaSeleccionada(receta)
+    setMsgConfirm('')
     let totalFactor = 0
     const detalle = {}
 
@@ -73,7 +82,6 @@ export default function Recetas({ isAdmin }) {
       pedido.items?.forEach(item => {
         if ((item.subgrupo || '').toLowerCase() !== (receta.subgrupo || '').toLowerCase()) return
         const cantidad = Number(item.cantidad)
-
         if (esUnidadPeso(item.medida)) {
           const ozMatch = item.medida?.match(/[\d.]+/)
           const ozUnidad = ozMatch ? parseFloat(ozMatch[0]) : 0
@@ -81,7 +89,6 @@ export default function Recetas({ isAdmin }) {
         } else {
           totalFactor += cantidad
         }
-
         const key = `${item.nombre} (${item.medida})`
         detalle[key] = (detalle[key] || 0) + cantidad
       })
@@ -111,6 +118,53 @@ export default function Recetas({ isAdmin }) {
       usaPeso, turnoFiltro,
       ingredientesCalculados, detalle
     })
+  }
+
+  const confirmarProduccion = async () => {
+    if (!resultado || resultado.vacio) return
+    setConfirmando(true)
+    setMsgConfirm('')
+
+    try {
+      const actualizados = []
+      const noEncontrados = []
+
+      for (const ing of resultado.ingredientesCalculados) {
+        const materia = inventario.find(m => m.nombre.toLowerCase().trim() === ing.nombre.toLowerCase().trim())
+        if (!materia) {
+          noEncontrados.push(ing.nombre)
+          continue
+        }
+
+        const ozUsadas = parseFloat(ing.oz)
+        let descuento = 0
+
+        if (materia.unidad === 'oz') {
+          descuento = ozUsadas
+        } else if (materia.unidad === 'lb') {
+          descuento = ozUsadas / 16
+        } else {
+          // unidades — no aplica conversión desde oz
+          noEncontrados.push(ing.nombre)
+          continue
+        }
+
+        const nuevoStock = Math.max(0, (materia.stockActual || 0) - descuento)
+        await updateDoc(doc(db, 'inventario', materia.id), { stockActual: parseFloat(nuevoStock.toFixed(3)) })
+        actualizados.push(ing.nombre)
+      }
+
+      let msgFinal = `✅ Producción confirmada. ${actualizados.length} ingrediente${actualizados.length !== 1 ? 's' : ''} descontado${actualizados.length !== 1 ? 's' : ''} del inventario.`
+      if (noEncontrados.length > 0) {
+        msgFinal += ` Sin match en inventario: ${noEncontrados.join(', ')}.`
+      }
+      setMsgConfirm(msgFinal)
+    } catch (e) {
+      setMsgConfirm('⚠️ Error al confirmar producción.')
+      console.error(e)
+    }
+
+    setConfirmando(false)
   }
 
   const guardarReceta = async () => {
@@ -174,7 +228,7 @@ export default function Recetas({ isAdmin }) {
       <div style={{ background:'white', position:'sticky', top:'52px', zIndex:90, borderBottom:`1px solid ${G.borde}` }}>
         <div style={{ display:'flex' }}>
           {subTabs.map(t => (
-            <button key={t.key} onClick={() => { setTab(t.key); setResultado(null) }}
+            <button key={t.key} onClick={() => { setTab(t.key); setResultado(null); setMsgConfirm('') }}
               style={{ flex:1, padding:'13px 16px', border:'none', background:'transparent',
                 color: tab === t.key ? G.cafe : G.gris,
                 fontWeight: tab === t.key ? 'bold' : 'normal',
@@ -192,11 +246,10 @@ export default function Recetas({ isAdmin }) {
           <>
             <h3 style={{ color: G.cafe, marginBottom:'16px' }}>🧮 Calcular receta</h3>
 
-            {/* Selector de turno */}
             <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Turno</p>
             <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
               {[{ val:'manana', label:'🌅 Mañana' }, { val:'tarde', label:'🌇 Tarde' }].map(op => (
-                <button key={op.val} onClick={() => { setTurnoFiltro(op.val); setResultado(null); setRecetaSeleccionada(null) }}
+                <button key={op.val} onClick={() => { setTurnoFiltro(op.val); setResultado(null); setRecetaSeleccionada(null); setMsgConfirm('') }}
                   style={{ flex:1, padding:'10px 8px', borderRadius:'8px',
                     border:`2px solid ${turnoFiltro === op.val ? G.cafe : G.borde}`,
                     background: turnoFiltro === op.val ? G.cafe : 'white',
@@ -259,7 +312,7 @@ export default function Recetas({ isAdmin }) {
                   ))}
                 </div>
 
-                <div style={{ background:'white', padding:'14px 16px', borderRadius:'10px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+                <div style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
                   <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>Ingredientes</p>
                   <div style={{ display:'grid', gridTemplateColumns:'1fr auto auto', gap:'0 12px', alignItems:'center' }}>
                     <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px' }}>Ingrediente</span>
@@ -274,6 +327,18 @@ export default function Recetas({ isAdmin }) {
                     ))}
                   </div>
                 </div>
+
+                {/* Botón confirmar producción */}
+                {msgConfirm ? (
+                  <div style={{ background: msgConfirm.includes('⚠️') ? '#fee2e2' : '#dcfce7', padding:'14px 16px', borderRadius:'10px', fontSize:'13px', color: msgConfirm.includes('⚠️') ? G.rojo : G.verde }}>
+                    {msgConfirm}
+                  </div>
+                ) : (
+                  <button onClick={confirmarProduccion} disabled={confirmando}
+                    style={{ width:'100%', padding:'14px', background: G.verde, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px' }}>
+                    {confirmando ? 'Confirmando...' : '✅ Confirmar producción'}
+                  </button>
+                )}
               </>
             )}
           </>
