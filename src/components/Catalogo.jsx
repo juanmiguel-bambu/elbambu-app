@@ -12,6 +12,8 @@ export default function Catalogo() {
   const [medida, setMedida] = useState('')
   const [grupoId, setGrupoId] = useState('')
   const [subgrupo, setSubgrupo] = useState('')
+  const [precioUnitario, setPrecioUnitario] = useState('')
+  const [precioMayoreo, setPrecioMayoreo] = useState('')
   const [sugerencias, setSugerencias] = useState([])
   const [mostrarSug, setMostrarSug] = useState(false)
   const [guardando, setGuardando] = useState(false)
@@ -51,7 +53,11 @@ export default function Catalogo() {
   const guardar = async () => {
     if (!nombre.trim() || !medida.trim() || !grupoId) { setMsg('⚠️ Completá todos los campos'); return }
     setGuardando(true)
-    const datos = { nombre: nombre.trim(), medida: medida.trim(), grupoId, subgrupo: subgrupo.trim(), activo: true }
+    const datos = {
+      nombre: nombre.trim(), medida: medida.trim(), grupoId, subgrupo: subgrupo.trim(), activo: true,
+      precioUnitario: precioUnitario ? parseFloat(precioUnitario) : 0,
+      precioMayoreo: precioMayoreo ? parseFloat(precioMayoreo) : 0
+    }
     if (editando) {
       await updateDoc(doc(db, 'productos', editando.id), datos)
       setEditando(null); setMsg('Producto actualizado ✅')
@@ -59,13 +65,23 @@ export default function Catalogo() {
       await setDoc(doc(db, 'productos', Date.now().toString()), { ...datos, creadoEn: new Date() })
       setMsg('Producto guardado ✅')
     }
-    setNombre(''); setMedida(''); setSubgrupo('')
+    setNombre(''); setMedida(''); setSubgrupo(''); setPrecioUnitario(''); setPrecioMayoreo('')
     setTimeout(() => { setMsg(''); setMostrarForm(false) }, 1500)
     setGuardando(false)
   }
 
-  const iniciarEdicion = (p) => { setEditando(p); setNombre(p.nombre); setMedida(p.medida); setGrupoId(p.grupoId || ''); setSubgrupo(p.subgrupo || ''); setMostrarForm(true); setMenuProducto(null); window.scrollTo(0,0) }
-  const cancelarEdicion = () => { setEditando(null); setNombre(''); setMedida(''); setSubgrupo(''); setGrupoId(tabGrupo || ''); setMostrarForm(false) }
+  const iniciarEdicion = (p) => {
+    setEditando(p); setNombre(p.nombre); setMedida(p.medida); setGrupoId(p.grupoId || '')
+    setSubgrupo(p.subgrupo || ''); setMostrarForm(true); setMenuProducto(null)
+    setPrecioUnitario(p.precioUnitario ? p.precioUnitario.toString() : '')
+    setPrecioMayoreo(p.precioMayoreo ? p.precioMayoreo.toString() : '')
+    window.scrollTo(0,0)
+  }
+  const cancelarEdicion = () => {
+    setEditando(null); setNombre(''); setMedida(''); setSubgrupo('')
+    setGrupoId(tabGrupo || ''); setMostrarForm(false)
+    setPrecioUnitario(''); setPrecioMayoreo('')
+  }
   const toggleActivo = async (p) => { await updateDoc(doc(db, 'productos', p.id), { activo: !p.activo }); setMenuProducto(null) }
   const eliminarProducto = async (p) => { await deleteDoc(doc(db, 'productos', p.id)); setConfirmEliminarProducto(null); setMenuProducto(null) }
 
@@ -74,6 +90,8 @@ export default function Catalogo() {
   const subgruposActivos = [...new Set(activos.map(p => p.subgrupo || '—'))]
 
   const inputStyle = { width:'100%', padding:'10px', marginBottom:'10px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto, fontSize:'15px' }
+
+  const formatPrecio = (p) => p ? `$${Number(p).toFixed(2)}` : null
 
   const ProductoCard = ({ p }) => (
     <div style={{ background:'white', padding:'12px 14px', borderRadius:'10px', marginBottom:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
@@ -99,6 +117,18 @@ export default function Catalogo() {
           <div style={{ flex:1, marginRight:'10px' }}>
             <p style={{ margin:0, fontWeight:'bold', color: G.texto, fontSize:'15px' }}>{p.nombre}</p>
             <p style={{ margin:0, fontSize:'12px', color: G.gris, marginTop:'2px' }}>{p.medida}</p>
+            <div style={{ display:'flex', gap:'8px', marginTop:'4px', flexWrap:'wrap' }}>
+              {formatPrecio(p.precioUnitario) && (
+                <span style={{ fontSize:'12px', color: G.cafe, fontWeight:'bold' }}>
+                  {formatPrecio(p.precioUnitario)} unit.
+                </span>
+              )}
+              {formatPrecio(p.precioMayoreo) && (
+                <span style={{ fontSize:'12px', color: G.gris }}>
+                  {formatPrecio(p.precioMayoreo)} may.
+                </span>
+              )}
+            </div>
           </div>
           <div style={{ display:'flex', gap:'6px' }}>
             <button onClick={() => iniciarEdicion(p)} style={{ padding:'7px 12px', background: G.amarilloClaro, color: G.amarillo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✏️</button>
@@ -159,7 +189,21 @@ export default function Catalogo() {
                   )}
                 </div>
                 <input placeholder="Nombre del producto" value={nombre} onChange={e => setNombre(e.target.value)} autoCorrect="off" autoCapitalize="off" spellCheck="false" style={inputStyle} />
-                <input placeholder="Medida / peso" value={medida} onChange={e => setMedida(e.target.value)} autoCorrect="off" autoCapitalize="off" spellCheck="false" style={{ ...inputStyle, marginBottom:'14px' }} />
+                <input placeholder="Medida / peso" value={medida} onChange={e => setMedida(e.target.value)} autoCorrect="off" autoCapitalize="off" spellCheck="false" style={inputStyle} />
+
+                <div style={{ display:'flex', gap:'8px' }}>
+                  <div style={{ flex:1 }}>
+                    <p style={{ fontSize:'12px', color: G.gris, margin:'0 0 4px' }}>Precio unitario ($)</p>
+                    <input type="number" placeholder="0.00" value={precioUnitario} onChange={e => setPrecioUnitario(e.target.value)} min="0" step="0.01"
+                      style={{ ...inputStyle, marginBottom:'14px' }} />
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <p style={{ fontSize:'12px', color: G.gris, margin:'0 0 4px' }}>Precio mayoreo ($)</p>
+                    <input type="number" placeholder="0.00" value={precioMayoreo} onChange={e => setPrecioMayoreo(e.target.value)} min="0" step="0.01"
+                      style={{ ...inputStyle, marginBottom:'14px' }} />
+                  </div>
+                </div>
+
                 {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize:'13px', marginBottom:'10px' }}>{msg}</p>}
                 <div style={{ display:'flex', gap:'8px' }}>
                   <button onClick={cancelarEdicion} style={{ flex:1, padding:'11px', background: G.borde, color: G.texto, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'14px' }}>Cancelar</button>
