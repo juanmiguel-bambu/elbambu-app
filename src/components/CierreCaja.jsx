@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { collection, onSnapshot, query, where, addDoc, getDocs } from 'firebase/firestore'
+import { collection, onSnapshot, query, where, addDoc } from 'firebase/firestore'
 import { G } from './constants'
 
 const MOTIVOS_MERMA = ['Quebrado', 'Vencido', 'Devolución', 'Error de pedido', 'Otro']
@@ -11,6 +11,7 @@ export default function CierreCaja({ user, isAdmin }) {
   const [productos, setProductos] = useState([])
   const [cierres, setCierres] = useState([])
   const [vendidos, setVendidos] = useState({})
+  const [sobrantes, setSobrantes] = useState({})
   const [mermas, setMermas] = useState({})
   const [motivosMerma, setMotivosMerma] = useState({})
   const [efectivo, setEfectivo] = useState('')
@@ -52,7 +53,6 @@ export default function CierreCaja({ user, isAdmin }) {
     return () => unsub()
   }, [fechaHoy, isAdmin, user.email])
 
-  // Calcular consolidado de pedidos por producto
   const consolidadoPedidos = () => {
     const mapa = {}
     const pedidosFiltrados = isAdmin && filtroVendedor !== 'todos'
@@ -80,17 +80,37 @@ export default function CierreCaja({ user, isAdmin }) {
   const items = consolidadoPedidos()
 
   const totalVendido = items.reduce((acc, item) => {
-    const cant = Number(vendidos[item.productoId] || 0)
-    return acc + (cant * item.precio)
+    return acc + (Number(vendidos[item.productoId] || 0) * item.precio)
   }, 0)
 
   const totalMerma = items.reduce((acc, item) => {
-    const cant = Number(mermas[item.productoId] || 0)
-    return acc + (cant * item.precio)
+    return acc + (Number(mermas[item.productoId] || 0) * item.precio)
   }, 0)
+
+  const validarCuadre = (item) => {
+    const v = Number(vendidos[item.productoId] || 0)
+    const s = Number(sobrantes[item.productoId] || 0)
+    const m = Number(mermas[item.productoId] || 0)
+    return v + s + m === item.totalPedido
+  }
+
+  const diferencia = (item) => {
+    const v = Number(vendidos[item.productoId] || 0)
+    const s = Number(sobrantes[item.productoId] || 0)
+    const m = Number(mermas[item.productoId] || 0)
+    return item.totalPedido - v - s - m
+  }
+
+  const todoCuadra = items.every(item => {
+    const v = Number(vendidos[item.productoId] || 0)
+    const s = Number(sobrantes[item.productoId] || 0)
+    const m = Number(mermas[item.productoId] || 0)
+    return v + s + m === item.totalPedido
+  })
 
   const cerrarCaja = async () => {
     if (items.length === 0) { setMsg('⚠️ No hay pedidos del día para cerrar'); return }
+    if (!todoCuadra) { setMsg('⚠️ Algunos productos no cuadran. Verificá Vendido + Sobrante + Merma = Total pedido'); return }
     setGuardando(true)
     try {
       const itemsCierre = items.map(item => ({
@@ -100,9 +120,9 @@ export default function CierreCaja({ user, isAdmin }) {
         precio: item.precio,
         totalPedido: item.totalPedido,
         vendido: Number(vendidos[item.productoId] || 0),
+        sobrante: Number(sobrantes[item.productoId] || 0),
         merma: Number(mermas[item.productoId] || 0),
         motivoMerma: motivosMerma[item.productoId] || '',
-        sobrante: item.totalPedido - Number(vendidos[item.productoId] || 0) - Number(mermas[item.productoId] || 0)
       }))
 
       await addDoc(collection(db, 'cierresCaja'), {
@@ -118,7 +138,7 @@ export default function CierreCaja({ user, isAdmin }) {
         creadoEn: new Date()
       })
 
-      setVendidos({}); setMermas({}); setMotivosMerma({})
+      setVendidos({}); setSobrantes({}); setMermas({}); setMotivosMerma({})
       setEfectivo(''); setTransferencia(''); setObservaciones('')
       setMsg('✅ Cierre registrado correctamente')
       setTimeout(() => setMsg(''), 3000)
@@ -139,7 +159,6 @@ export default function CierreCaja({ user, isAdmin }) {
 
   return (
     <div style={{ maxWidth:'520px', margin:'0 auto' }}>
-
       <div style={{ background:'white', position:'sticky', top:'52px', zIndex:90, borderBottom:`1px solid ${G.borde}` }}>
         <div style={{ display:'flex' }}>
           {subTabs.map(t => (
@@ -157,13 +176,11 @@ export default function CierreCaja({ user, isAdmin }) {
 
       <div style={{ padding:'16px' }}>
 
-        {/* ── TAB CIERRE ── */}
         {tab === 'cierre' && (
           <>
             <h3 style={{ color: G.cafe, marginBottom:'4px' }}>💰 Cierre de Caja</h3>
             <p style={{ fontSize:'13px', color: G.gris, marginBottom:'16px' }}>{fechaHoy} · {user.email.split('@')[0]}</p>
 
-            {/* Filtro vendedor — solo admin */}
             {isAdmin && vendedoresHoy.length > 0 && (
               <div style={{ marginBottom:'16px' }}>
                 <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Vendedor</p>
@@ -184,37 +201,46 @@ export default function CierreCaja({ user, isAdmin }) {
 
             {items.length > 0 && (
               <>
-                {/* Header resumen */}
                 <div style={{ background: G.cafe, color:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px' }}>
                   <p style={{ margin:0, fontWeight:'bold', fontSize:'15px' }}>Pedidos del día — {items.length} producto{items.length !== 1 ? 's' : ''}</p>
-                  <p style={{ margin:'4px 0 0', fontSize:'13px', opacity:0.85 }}>
-                    Registrá lo vendido y la merma por producto
-                  </p>
+                  <p style={{ margin:'4px 0 0', fontSize:'13px', opacity:0.85 }}>Vendido + Sobrante + Merma debe ser igual al total pedido</p>
                 </div>
 
-                {/* Lista de productos */}
                 {items.map(item => {
-                  const vendidoCant = Number(vendidos[item.productoId] || 0)
-                  const mermaCant = Number(mermas[item.productoId] || 0)
-                  const sobrante = item.totalPedido - vendidoCant - mermaCant
+                  const v = Number(vendidos[item.productoId] || 0)
+                  const s = Number(sobrantes[item.productoId] || 0)
+                  const m = Number(mermas[item.productoId] || 0)
+                  const dif = item.totalPedido - v - s - m
+                  const cuadra = dif === 0
+                  const hayDatos = v + s + m > 0
+
                   return (
-                    <div key={item.productoId} style={{ background:'white', borderRadius:'10px', marginBottom:'10px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', overflow:'hidden' }}>
+                    <div key={item.productoId} style={{ background:'white', borderRadius:'10px', marginBottom:'10px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', overflow:'hidden', border: hayDatos ? `2px solid ${cuadra ? G.verde : G.rojo}` : `2px solid transparent` }}>
                       <div style={{ padding:'12px 16px', borderBottom:`1px solid ${G.borde}`, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                         <div>
                           <p style={{ margin:0, fontWeight:'bold', fontSize:'14px', color: G.texto }}>{item.nombre}</p>
-                          <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{item.medida} · Pedido: {item.totalPedido} uds{item.precio > 0 ? ` · $${item.precio.toFixed(2)}` : ''}</p>
+                          <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{item.medida} · Total pedido: <strong>{item.totalPedido}</strong> uds{item.precio > 0 ? ` · $${item.precio.toFixed(2)}` : ''}</p>
                         </div>
-                        {sobrante < 0 && (
-                          <span style={{ fontSize:'11px', color: G.rojo, fontWeight:'bold' }}>⚠️ excede</span>
+                        {hayDatos && (
+                          <span style={{ fontSize:'12px', fontWeight:'bold', color: cuadra ? G.verde : G.rojo }}>
+                            {cuadra ? '✅' : `⚠️ ${dif > 0 ? '+' : ''}${dif}`}
+                          </span>
                         )}
                       </div>
                       <div style={{ padding:'12px 16px' }}>
-                        <div style={{ display:'flex', gap:'12px', marginBottom:'8px' }}>
+                        <div style={{ display:'flex', gap:'8px', marginBottom:'8px' }}>
                           <div style={{ flex:1 }}>
                             <p style={{ fontSize:'11px', color: G.verde, fontWeight:'bold', margin:'0 0 4px', textTransform:'uppercase' }}>✅ Vendido</p>
-                            <input type="number" placeholder="0" min="0" max={item.totalPedido}
+                            <input type="number" placeholder="0" min="0"
                               value={vendidos[item.productoId] || ''}
                               onChange={e => setVendidos(prev => ({ ...prev, [item.productoId]: e.target.value }))}
+                              style={{ ...inputStyle, textAlign:'center' }} />
+                          </div>
+                          <div style={{ flex:1 }}>
+                            <p style={{ fontSize:'11px', color:'#1d4ed8', fontWeight:'bold', margin:'0 0 4px', textTransform:'uppercase' }}>📦 Sobrante</p>
+                            <input type="number" placeholder="0" min="0"
+                              value={sobrantes[item.productoId] || ''}
+                              onChange={e => setSobrantes(prev => ({ ...prev, [item.productoId]: e.target.value }))}
                               style={{ ...inputStyle, textAlign:'center' }} />
                           </div>
                           <div style={{ flex:1 }}>
@@ -225,30 +251,34 @@ export default function CierreCaja({ user, isAdmin }) {
                               style={{ ...inputStyle, textAlign:'center' }} />
                           </div>
                         </div>
+
                         {Number(mermas[item.productoId] || 0) > 0 && (
-                          <div>
+                          <div style={{ marginBottom:'8px' }}>
                             <p style={{ fontSize:'11px', color: G.gris, margin:'0 0 4px' }}>Motivo de merma</p>
                             <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
-                              {MOTIVOS_MERMA.map(m => (
-                                <button key={m} onClick={() => setMotivosMerma(prev => ({ ...prev, [item.productoId]: m }))}
-                                  style={{ padding:'5px 10px', borderRadius:'20px', fontSize:'11px', border:`2px solid ${motivosMerma[item.productoId] === m ? G.rojo : G.borde}`, background: motivosMerma[item.productoId] === m ? '#fee2e2' : 'white', color: motivosMerma[item.productoId] === m ? G.rojo : G.gris, cursor:'pointer' }}>
-                                  {m}
+                              {MOTIVOS_MERMA.map(mot => (
+                                <button key={mot} onClick={() => setMotivosMerma(prev => ({ ...prev, [item.productoId]: mot }))}
+                                  style={{ padding:'5px 10px', borderRadius:'20px', fontSize:'11px', border:`2px solid ${motivosMerma[item.productoId] === mot ? G.rojo : G.borde}`, background: motivosMerma[item.productoId] === mot ? '#fee2e2' : 'white', color: motivosMerma[item.productoId] === mot ? G.rojo : G.gris, cursor:'pointer' }}>
+                                  {mot}
                                 </button>
                               ))}
                             </div>
                           </div>
                         )}
-                        <div style={{ marginTop:'8px', display:'flex', gap:'12px', fontSize:'12px' }}>
-                          <span style={{ color: G.verde }}>Vendido: <strong>{vendidoCant}</strong></span>
-                          <span style={{ color: G.rojo }}>Merma: <strong>{mermaCant}</strong></span>
-                          <span style={{ color: sobrante < 0 ? G.rojo : G.gris }}>Sobrante: <strong>{sobrante}</strong></span>
+
+                        <div style={{ display:'flex', gap:'10px', fontSize:'12px', color: G.gris }}>
+                          <span style={{ color: G.verde }}>✅ {v}</span>
+                          <span style={{ color:'#1d4ed8' }}>📦 {s}</span>
+                          <span style={{ color: G.rojo }}>🗑️ {m}</span>
+                          <span style={{ color: cuadra && hayDatos ? G.verde : dif !== 0 && hayDatos ? G.rojo : G.gris }}>
+                            {cuadra && hayDatos ? '= ✅ cuadra' : hayDatos ? `faltan ${dif}` : `= ${item.totalPedido} pendiente`}
+                          </span>
                         </div>
                       </div>
                     </div>
                   )
                 })}
 
-                {/* Totales */}
                 <div style={{ background:'white', padding:'16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', borderTop:`3px solid ${G.cafe}` }}>
                   <p style={{ fontWeight:'bold', color: G.cafe, marginBottom:'14px', fontSize:'14px' }}>💵 Totales</p>
 
@@ -285,6 +315,15 @@ export default function CierreCaja({ user, isAdmin }) {
                     placeholder="Ej: cliente devolvió 5 semitas..." rows={2}
                     style={{ ...inputStyle, resize:'vertical', marginBottom:'14px', fontFamily:'inherit' }} />
 
+                  {!todoCuadra && items.some(item => {
+                    const v = Number(vendidos[item.productoId] || 0)
+                    const s = Number(sobrantes[item.productoId] || 0)
+                    const m = Number(mermas[item.productoId] || 0)
+                    return v + s + m > 0 && v + s + m !== item.totalPedido
+                  }) && (
+                    <p style={{ color: G.rojo, fontSize:'13px', marginBottom:'10px' }}>⚠️ Algunos productos no cuadran. Verificá que Vendido + Sobrante + Merma = Total pedido.</p>
+                  )}
+
                   {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize:'13px', marginBottom:'10px' }}>{msg}</p>}
                   <button onClick={cerrarCaja} disabled={guardando}
                     style={{ width:'100%', padding:'14px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'16px' }}>
@@ -294,21 +333,17 @@ export default function CierreCaja({ user, isAdmin }) {
               </>
             )}
 
-            {/* Cierres del día */}
             {cierres.length > 0 && (
               <div style={{ marginTop:'8px' }}>
                 <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>
                   Cierres registrados hoy ({cierres.length})
                 </p>
-                {cierres.map(c => (
-                  <CierreCard key={c.id} c={c} isAdmin={isAdmin} />
-                ))}
+                {cierres.map(c => <CierreCard key={c.id} c={c} isAdmin={isAdmin} />)}
               </div>
             )}
           </>
         )}
 
-        {/* ── TAB REPORTE (solo admin) ── */}
         {tab === 'reporte' && isAdmin && (
           <ReporteAdmin cierres={cierres} fechaHoy={fechaHoy} />
         )}
@@ -347,11 +382,11 @@ function CierreCard({ c, isAdmin }) {
                 <span style={{ fontWeight:'bold' }}>{item.nombre}</span>
                 <span style={{ color: G.gris }}>{item.medida}</span>
               </div>
-              <div style={{ display:'flex', gap:'12px', marginTop:'2px', color: G.gris }}>
-                <span>Pedido: {item.totalPedido}</span>
+              <div style={{ display:'flex', gap:'10px', marginTop:'2px', flexWrap:'wrap' }}>
+                <span style={{ color: G.gris }}>Pedido: {item.totalPedido}</span>
                 <span style={{ color: G.verde }}>✅ {item.vendido}</span>
+                <span style={{ color:'#1d4ed8' }}>📦 {item.sobrante}</span>
                 <span style={{ color: G.rojo }}>🗑️ {item.merma}{item.motivoMerma ? ` (${item.motivoMerma})` : ''}</span>
-                <span>Sobra: {item.sobrante}</span>
               </div>
             </div>
           ))}
@@ -376,7 +411,6 @@ function ReporteAdmin({ cierres, fechaHoy }) {
   const totalEfectivo = cierres.reduce((acc, c) => acc + (c.efectivo || 0), 0)
   const totalTransferencia = cierres.reduce((acc, c) => acc + (c.transferencia || 0), 0)
 
-  // Consolidar mermas por producto
   const mermasPorProducto = {}
   cierres.forEach(c => {
     c.items?.forEach(item => {
@@ -391,16 +425,15 @@ function ReporteAdmin({ cierres, fechaHoy }) {
 
   return (
     <div>
-      <h3 style={{ color: '#8B6B3E', marginBottom:'4px' }}>📊 Reporte del día</h3>
-      <p style={{ fontSize:'13px', color: '#888', marginBottom:'16px' }}>{fechaHoy} · {cierres.length} cierre{cierres.length !== 1 ? 's' : ''}</p>
+      <h3 style={{ color: G.cafe, marginBottom:'4px' }}>📊 Reporte del día</h3>
+      <p style={{ fontSize:'13px', color: G.gris, marginBottom:'16px' }}>{fechaHoy} · {cierres.length} cierre{cierres.length !== 1 ? 's' : ''}</p>
 
-      {/* Resumen general */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'16px' }}>
         {[
-          { label:'Total vendido', valor:`$${totalVendidoGeneral.toFixed(2)}`, color: '#16a34a', bg:'#dcfce7' },
-          { label:'Total merma', valor:`$${totalMermaGeneral.toFixed(2)}`, color: '#dc2626', bg:'#fee2e2' },
-          { label:'Efectivo', valor:`$${totalEfectivo.toFixed(2)}`, color: '#8B6B3E', bg:'#f5f0eb' },
-          { label:'Transferencia', valor:`$${totalTransferencia.toFixed(2)}`, color: '#1d4ed8', bg:'#dbeafe' },
+          { label:'Total vendido', valor:`$${totalVendidoGeneral.toFixed(2)}`, color: G.verde, bg:'#dcfce7' },
+          { label:'Total merma', valor:`$${totalMermaGeneral.toFixed(2)}`, color: G.rojo, bg:'#fee2e2' },
+          { label:'Efectivo', valor:`$${totalEfectivo.toFixed(2)}`, color: G.cafe, bg: G.cafeClaro },
+          { label:'Transferencia', valor:`$${totalTransferencia.toFixed(2)}`, color:'#1d4ed8', bg:'#dbeafe' },
         ].map(item => (
           <div key={item.label} style={{ background: item.bg, padding:'12px 14px', borderRadius:'10px', textAlign:'center' }}>
             <p style={{ margin:0, fontSize:'11px', color: item.color, fontWeight:'bold', textTransform:'uppercase', letterSpacing:'0.5px' }}>{item.label}</p>
@@ -409,36 +442,34 @@ function ReporteAdmin({ cierres, fechaHoy }) {
         ))}
       </div>
 
-      {/* Por vendedor */}
-      <p style={{ fontSize:'12px', fontWeight:'bold', color: '#888', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Por vendedor</p>
+      <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Por vendedor</p>
       {cierres.map(c => (
         <div key={c.id} style={{ background:'white', padding:'12px 16px', borderRadius:'10px', marginBottom:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <div>
             <p style={{ margin:0, fontWeight:'bold', fontSize:'14px' }}>{c.vendedorNombre}</p>
-            <p style={{ margin:'2px 0 0', fontSize:'12px', color: '#888' }}>
+            <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>
               💵 ${c.efectivo?.toFixed(2)} · 🏦 ${c.transferencia?.toFixed(2)}
             </p>
           </div>
           <div style={{ textAlign:'right' }}>
-            <p style={{ margin:0, fontWeight:'bold', color: '#16a34a' }}>${c.totalVendido?.toFixed(2)}</p>
-            <p style={{ margin:0, fontSize:'12px', color: '#dc2626' }}>-${c.totalMerma?.toFixed(2)} merma</p>
+            <p style={{ margin:0, fontWeight:'bold', color: G.verde }}>${c.totalVendido?.toFixed(2)}</p>
+            <p style={{ margin:0, fontSize:'12px', color: G.rojo }}>-${c.totalMerma?.toFixed(2)} merma</p>
           </div>
         </div>
       ))}
 
-      {/* Mermas por producto */}
       {Object.keys(mermasPorProducto).length > 0 && (
         <>
-          <p style={{ fontSize:'12px', fontWeight:'bold', color: '#888', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px', marginTop:'16px' }}>🗑️ Mermas por producto</p>
+          <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px', marginTop:'16px' }}>🗑️ Mermas por producto</p>
           {Object.entries(mermasPorProducto).sort((a,b) => b[1].total - a[1].total).map(([nombre, data]) => (
             <div key={nombre} style={{ background:'white', padding:'12px 16px', borderRadius:'10px', marginBottom:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
                 <p style={{ margin:0, fontWeight:'bold', fontSize:'14px' }}>{nombre}</p>
-                <span style={{ fontWeight:'bold', color: '#dc2626' }}>{data.total} uds</span>
+                <span style={{ fontWeight:'bold', color: G.rojo }}>{data.total} uds</span>
               </div>
               <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
                 {Object.entries(data.motivos).map(([motivo, cant]) => (
-                  <span key={motivo} style={{ fontSize:'11px', background:'#fee2e2', color:'#dc2626', padding:'3px 8px', borderRadius:'20px' }}>
+                  <span key={motivo} style={{ fontSize:'11px', background:'#fee2e2', color: G.rojo, padding:'3px 8px', borderRadius:'20px' }}>
                     {motivo}: {cant}
                   </span>
                 ))}
