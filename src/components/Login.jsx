@@ -17,21 +17,21 @@ export default function Login() {
   }
 
   return (
-    <div style={{ display:'flex', justifyContent:'center', alignItems:'center', height:'100vh', background: G.cafeClaro }}>
-      <div style={{ width:'300px', background:'white', padding:'32px', borderRadius:'12px', boxShadow:'0 2px 12px rgba(0,0,0,0.1)' }}>
-        <div style={{ textAlign:'center', marginBottom:'24px' }}>
+    <div style={{ display:'flex', justifyContent:'center', alignItems:'center', height:'100vh', background: G.cafeClaro, padding:'24px' }}>
+      <div style={{ width:'100%', maxWidth:'380px', background:'white', padding:'40px 32px', borderRadius:'16px', boxShadow:'0 2px 16px rgba(0,0,0,0.1)' }}>
+        <div style={{ textAlign:'center', marginBottom:'32px' }}>
           <img src="/icon-192.png" alt="El Bambú"
-            style={{ width:'80px', height:'80px', borderRadius:'18px', marginBottom:'8px', display:'block', margin:'0 auto 8px' }} />
-          <h2 style={{ color: G.cafe, margin:'8px 0 0' }}>El Bambú</h2>
+            style={{ width:'100px', height:'100px', borderRadius:'22px', display:'block', margin:'0 auto 12px' }} />
+          <h2 style={{ color: G.cafe, margin:0, fontSize:'26px' }}>El Bambú</h2>
         </div>
         <form onSubmit={handleLogin}>
           <input type="email" placeholder="Correo" value={email} onChange={e => setEmail(e.target.value)}
-            style={{ width:'100%', padding:'10px', marginBottom:'12px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto }} />
+            style={{ width:'100%', padding:'14px', marginBottom:'14px', borderRadius:'10px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto, fontSize:'16px' }} />
           <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)}
-            style={{ width:'100%', padding:'10px', marginBottom:'12px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto }} />
-          {error && <p style={{ color: G.rojo, fontSize:'13px', marginBottom:'8px' }}>{error}</p>}
+            style={{ width:'100%', padding:'14px', marginBottom:'14px', borderRadius:'10px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto, fontSize:'16px' }} />
+          {error && <p style={{ color: G.rojo, fontSize:'14px', marginBottom:'10px' }}>{error}</p>}
           <button type="submit" disabled={loading}
-            style={{ width:'100%', padding:'12px', background: G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold' }}>
+            style={{ width:'100%', padding:'16px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'18px' }}>
             {loading ? 'Ingresando...' : 'Ingresar'}
           </button>
         </form>
