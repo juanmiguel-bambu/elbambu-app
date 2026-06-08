@@ -70,12 +70,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    // Escuchar config del vendedor de la semana
     const unsub = onSnapshot(doc(db, 'config', 'vendedorSemana'), snap => {
       if (snap.exists()) {
         const activo = snap.data().activo || false
         setConfigSemana(activo)
-        // Mostrar banner si es viernes y está activo
         const esViernes = new Date().getDay() === 5
         if (activo && esViernes) setBannerSemana(true)
       }
@@ -114,27 +112,26 @@ export default function App() {
   const puedeVerSemana = isAdmin || rol === 'vendedor'
 
   const tabs = [
-    ...(rol === 'vendedor' ? [{ key:'nuevo-pedido', label:'➕ Pedido' }] : []),
-    ...(rol === 'vendedor' ? [{ key:'mis-pedidos', label:'📦 Mis pedidos' }] : []),
-    ...(rol === 'admin' ? [{ key:'nuevo-pedido', label:'➕ Pedido' }] : []),
-    ...(rol === 'admin' ? [{ key:'mis-pedidos', label:'📦 Mis pedidos' }] : []),
-    ...(rol !== 'vendedor' ? [{ key:'consolidado', label:'📊 Consolidado' }] : []),
-    ...(puedeVerRecetas ? [{ key:'recetas', label:'🧾 Recetas' }] : []),
-    ...(puedeVerInventario ? [{ key:'inventario', label:'📦 Inventario' }] : []),
-    ...(puedeVerClientes ? [{ key:'clientes-mayoreo', label:'🤝 Mayoreo' }] : []),
-    ...(puedeVerCaja ? [{ key:'cierre-caja', label:'💰 Caja' }] : []),
-    ...(puedeVerSemana ? [{ key:'vendedor-semana', label:'🏆 Semana' }] : []),
-    ...(isAdmin ? [{ key:'catalogo', label:'📋 Catálogo' }] : []),
-    ...(isAdmin ? [{ key:'usuarios', label:'👥 Usuarios' }] : []),
+    ...(rol === 'vendedor' ? [{ key:'nuevo-pedido', icono:'➕', label:'Pedido' }] : []),
+    ...(rol === 'vendedor' ? [{ key:'mis-pedidos', icono:'📦', label:'Mis pedidos' }] : []),
+    ...(rol === 'admin' ? [{ key:'nuevo-pedido', icono:'➕', label:'Pedido' }] : []),
+    ...(rol === 'admin' ? [{ key:'mis-pedidos', icono:'📦', label:'Mis pedidos' }] : []),
+    ...(rol !== 'vendedor' ? [{ key:'consolidado', icono:'📊', label:'Consolidado' }] : []),
+    ...(puedeVerRecetas ? [{ key:'recetas', icono:'🧾', label:'Recetas' }] : []),
+    ...(puedeVerInventario ? [{ key:'inventario', icono:'📦', label:'Inventario' }] : []),
+    ...(puedeVerClientes ? [{ key:'clientes-mayoreo', icono:'🤝', label:'Mayoreo' }] : []),
+    ...(puedeVerCaja ? [{ key:'cierre-caja', icono:'💰', label:'Caja' }] : []),
+    ...(puedeVerSemana ? [{ key:'vendedor-semana', icono:'🏆', label:'Semana' }] : []),
+    ...(isAdmin ? [{ key:'catalogo', icono:'📋', label:'Catálogo' }] : []),
+    ...(isAdmin ? [{ key:'usuarios', icono:'👥', label:'Usuarios' }] : []),
   ]
 
   const tabsKeys = tabs.map(t => t.key)
   const tabActual = tabsKeys.includes(tab) ? tab : tabsKeys[0]
 
   return (
-    <div translate="no" style={{ minHeight:'100vh', background: G.cafeClaro, paddingBottom:'70px' }}>
+    <div translate="no" style={{ minHeight:'100vh', background: G.cafeClaro, paddingBottom:'80px' }}>
 
-      {/* Banner viernes — vendedor de la semana */}
       {bannerSemana && (
         <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:200, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
           <div style={{ background:'white', borderRadius:'16px', padding:'24px', maxWidth:'380px', width:'100%', textAlign:'center', boxShadow:'0 8px 32px rgba(0,0,0,0.2)' }}>
@@ -180,10 +177,11 @@ export default function App() {
       <div style={{ position:'fixed', bottom:0, left:0, right:0, background:'white', borderTop:`1px solid ${G.borde}`, display:'flex', overflowX:'auto', scrollbarWidth:'none' }}>
         {tabs.map(t => (
           <button key={t.key} onClick={() => { setTab(t.key); limpiarBadge(); if (t.key === 'clientes-mayoreo') setBadgeClientes(0) }}
-            style={{ flexShrink:0, padding:'12px 14px', border:'none', background: tabActual === t.key ? G.cafeClaro : 'white', color: tabActual === t.key ? G.cafe : G.gris, fontWeight: tabActual === t.key ? 'bold' : 'normal', cursor:'pointer', fontSize:'11px', position:'relative', whiteSpace:'nowrap' }}>
-            {t.label}
+            style={{ flexShrink:0, padding:'10px 16px', border:'none', background: tabActual === t.key ? G.cafeClaro : 'white', color: tabActual === t.key ? G.cafe : G.gris, fontWeight: tabActual === t.key ? 'bold' : 'normal', cursor:'pointer', position:'relative', whiteSpace:'nowrap', display:'flex', flexDirection:'column', alignItems:'center', gap:'3px' }}>
+            <span style={{ fontSize:'20px', lineHeight:1 }}>{t.icono}</span>
+            <span style={{ fontSize:'12px' }}>{t.label}</span>
             {t.key === 'clientes-mayoreo' && badgeClientes > 0 && (
-              <span style={{ position:'absolute', top:'6px', right:'4px', background: G.rojo, color:'white', borderRadius:'10px', fontSize:'10px', fontWeight:'bold', padding:'1px 5px', minWidth:'16px', textAlign:'center' }}>
+              <span style={{ position:'absolute', top:'4px', right:'4px', background: G.rojo, color:'white', borderRadius:'10px', fontSize:'10px', fontWeight:'bold', padding:'1px 5px', minWidth:'16px', textAlign:'center' }}>
                 {badgeClientes}
               </span>
             )}
