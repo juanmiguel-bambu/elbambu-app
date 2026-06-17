@@ -3,6 +3,17 @@ import { db } from '../firebase'
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, where } from 'firebase/firestore'
 import { G } from './constants'
 
+// Normaliza cualquier receta al formato de secciones para cálculo y display
+const normalizarSecciones = (receta) => {
+  if (receta.secciones && receta.secciones.length > 0) return receta.secciones
+  if (receta.ingredientes && receta.ingredientes.length > 0) {
+    return [{ nombre: 'Ingredientes', ingredientes: receta.ingredientes }]
+  }
+  return []
+}
+
+const seccionVacia = (nombre = '') => ({ nombre, ingredientes: [{ nombre: '', oz: '' }] })
+
 export default function Recetas({ isAdmin }) {
   const [tab, setTab] = useState('calcular')
   const [recetas, setRecetas] = useState([])
@@ -16,10 +27,16 @@ export default function Recetas({ isAdmin }) {
   const [confirmando, setConfirmando] = useState(false)
   const [msgConfirm, setMsgConfirm] = useState('')
 
+  // Form state
   const [formNombre, setFormNombre] = useState('')
   const [formGrupoId, setFormGrupoId] = useState('')
   const [formSubgrupo, setFormSubgrupo] = useState('')
+  const [formUsaSecciones, setFormUsaSecciones] = useState(false)
+  // Modo sin secciones: lista plana
   const [formIngredientes, setFormIngredientes] = useState([{ nombre: '', oz: '' }])
+  // Modo con secciones: array de {nombre, ingredientes}
+  const [formSecciones, setFormSecciones] = useState([seccionVacia('Masa'), seccionVacia('Relleno')])
+
   const [editandoId, setEditandoId] = useState(null)
   const [guardando, setGuardando] = useState(false)
   const [msg, setMsg] = useState('')
@@ -100,16 +117,19 @@ export default function Recetas({ isAdmin }) {
       return
     }
 
-    const masaBaseOz = receta.ingredientes.reduce((acc, i) => acc + Number(i.oz), 0)
-    const primerasMedidas = Object.keys(detalle)
-    const usaPeso = primerasMedidas.some(k => esUnidadPeso(k))
+    const secciones = normalizarSecciones(receta)
+    const usaPeso = Object.keys(detalle).some(k => esUnidadPeso(k))
+
+    const masaBaseOz = secciones[0]?.ingredientes?.reduce((acc, i) => acc + Number(i.oz || 0), 0) || 0
     const factor = usaPeso ? totalFactor / masaBaseOz : totalFactor
 
-    const ingredientesCalculados = receta.ingredientes.map(i => {
-      const ozTotal = Number(i.oz) * factor
-      const lbTotal = ozTotal / 16
-      return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: lbTotal.toFixed(3) }
-    })
+    const seccionesCalculadas = secciones.map(sec => ({
+      nombre: sec.nombre,
+      ingredientes: sec.ingredientes.map(i => {
+        const ozTotal = Number(i.oz) * factor
+        return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: (ozTotal / 16).toFixed(3) }
+      })
+    }))
 
     setResultado({
       vacio: false, receta,
@@ -117,7 +137,7 @@ export default function Recetas({ isAdmin }) {
       masaBaseOz: masaBaseOz.toFixed(2),
       factor: factor.toFixed(4),
       usaPeso, turnoFiltro,
-      ingredientesCalculados, detalle
+      seccionesCalculadas, detalle
     })
   }
 
@@ -128,7 +148,8 @@ export default function Recetas({ isAdmin }) {
     try {
       const actualizados = []
       const noEncontrados = []
-      for (const ing of resultado.ingredientesCalculados) {
+      const todosLosIngredientes = resultado.seccionesCalculadas.flatMap(sec => sec.ingredientes)
+      for (const ing of todosLosIngredientes) {
         const materia = inventario.find(m => m.nombre.toLowerCase().trim() === ing.nombre.toLowerCase().trim())
         if (!materia) { noEncontrados.push(ing.nombre); continue }
         const ozUsadas = parseFloat(ing.oz)
@@ -156,15 +177,27 @@ export default function Recetas({ isAdmin }) {
 
   const guardarReceta = async () => {
     if (!formNombre.trim() || !formGrupoId || !formSubgrupo.trim()) { setMsg('⚠️ Completá nombre, grupo y subgrupo'); return }
-    const ingValidos = formIngredientes.filter(i => i.nombre.trim() && i.oz)
-    if (ingValidos.length === 0) { setMsg('⚠️ Agregá al menos un ingrediente'); return }
-    setGuardando(true)
-    const datos = {
-      nombre: formNombre.trim(),
-      grupoId: formGrupoId,
-      subgrupo: formSubgrupo.trim(),
-      ingredientes: ingValidos.map(i => ({ nombre: i.nombre.trim(), oz: parseFloat(i.oz) }))
+
+    let datos = { nombre: formNombre.trim(), grupoId: formGrupoId, subgrupo: formSubgrupo.trim() }
+
+    if (formUsaSecciones) {
+      const seccionesValidas = formSecciones
+        .map(sec => ({ nombre: sec.nombre.trim(), ingredientes: sec.ingredientes.filter(i => i.nombre.trim() && i.oz) }))
+        .filter(sec => sec.nombre && sec.ingredientes.length > 0)
+      if (seccionesValidas.length === 0) { setMsg('⚠️ Agregá al menos una sección con ingredientes'); return }
+      datos.secciones = seccionesValidas.map(sec => ({
+        nombre: sec.nombre,
+        ingredientes: sec.ingredientes.map(i => ({ nombre: i.nombre.trim(), oz: parseFloat(i.oz) }))
+      }))
+      datos.ingredientes = []
+    } else {
+      const ingValidos = formIngredientes.filter(i => i.nombre.trim() && i.oz)
+      if (ingValidos.length === 0) { setMsg('⚠️ Agregá al menos un ingrediente'); return }
+      datos.ingredientes = ingValidos.map(i => ({ nombre: i.nombre.trim(), oz: parseFloat(i.oz) }))
+      datos.secciones = []
     }
+
+    setGuardando(true)
     if (editandoId) {
       await updateDoc(doc(db, 'recetas', editandoId), datos)
       setMsg('Receta actualizada ✅')
@@ -180,13 +213,27 @@ export default function Recetas({ isAdmin }) {
   const resetForm = () => {
     setFormNombre(''); setFormGrupoId(''); setFormSubgrupo('')
     setFormIngredientes([{ nombre: '', oz: '' }])
+    setFormSecciones([seccionVacia('Masa'), seccionVacia('Relleno')])
+    setFormUsaSecciones(false)
     setEditandoId(null); setMostrarForm(false); setMostrarSugIng({})
   }
 
   const iniciarEdicion = (r) => {
-    setFormNombre(r.nombre); setFormGrupoId(r.grupoId); setFormSubgrupo(r.subgrupo)
-    setFormIngredientes(r.ingredientes.map(i => ({ nombre: i.nombre, oz: i.oz.toString() })))
-    setEditandoId(r.id); setMostrarForm(true)
+    setFormNombre(r.nombre)
+    setFormGrupoId(r.grupoId)
+    setFormSubgrupo(r.subgrupo)
+    const tieneSecciones = r.secciones && r.secciones.length > 0
+    setFormUsaSecciones(tieneSecciones)
+    if (tieneSecciones) {
+      setFormSecciones(r.secciones.map(sec => ({
+        nombre: sec.nombre,
+        ingredientes: sec.ingredientes.map(i => ({ nombre: i.nombre, oz: i.oz.toString() }))
+      })))
+    } else {
+      setFormIngredientes((r.ingredientes || []).map(i => ({ nombre: i.nombre, oz: i.oz.toString() })))
+    }
+    setEditandoId(r.id)
+    setMostrarForm(true)
   }
 
   const eliminar = async (id) => {
@@ -202,13 +249,40 @@ export default function Recetas({ isAdmin }) {
     setFormIngredientes(nuevos)
   }
 
-  const sugerenciasParaIng = (idx) => {
+  const agregarSeccion = () => setFormSecciones([...formSecciones, seccionVacia()])
+  const quitarSeccion = (si) => setFormSecciones(formSecciones.filter((_, i) => i !== si))
+  const actualizarNombreSeccion = (si, valor) => {
+    const nuevas = [...formSecciones]
+    nuevas[si] = { ...nuevas[si], nombre: valor }
+    setFormSecciones(nuevas)
+  }
+  const agregarIngSeccion = (si) => {
+    const nuevas = [...formSecciones]
+    nuevas[si] = { ...nuevas[si], ingredientes: [...nuevas[si].ingredientes, { nombre: '', oz: '' }] }
+    setFormSecciones(nuevas)
+  }
+  const quitarIngSeccion = (si, ii) => {
+    const nuevas = [...formSecciones]
+    nuevas[si] = { ...nuevas[si], ingredientes: nuevas[si].ingredientes.filter((_, i) => i !== ii) }
+    setFormSecciones(nuevas)
+  }
+  const actualizarIngSeccion = (si, ii, campo, valor) => {
+    const nuevas = [...formSecciones]
+    const ings = [...nuevas[si].ingredientes]
+    ings[ii] = { ...ings[ii], [campo]: valor }
+    nuevas[si] = { ...nuevas[si], ingredientes: ings }
+    setFormSecciones(nuevas)
+  }
+
+  const sugerenciasSimple = (idx) => {
     const texto = formIngredientes[idx]?.nombre || ''
     if (!texto.trim()) return []
-    return inventario
-      .map(m => m.nombre)
-      .filter(n => n.toLowerCase().includes(texto.toLowerCase()))
-      .sort()
+    return inventario.map(m => m.nombre).filter(n => n.toLowerCase().includes(texto.toLowerCase())).sort()
+  }
+  const sugerenciasSeccion = (si, ii) => {
+    const texto = formSecciones[si]?.ingredientes[ii]?.nombre || ''
+    if (!texto.trim()) return []
+    return inventario.map(m => m.nombre).filter(n => n.toLowerCase().includes(texto.toLowerCase())).sort()
   }
 
   const inputStyle = { width:'100%', padding:'10px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto, fontSize:'14px' }
@@ -308,21 +382,30 @@ export default function Recetas({ isAdmin }) {
                   ))}
                 </div>
 
-                <div style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-                  <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>Ingredientes</p>
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr auto auto', gap:'0 12px', alignItems:'center' }}>
-                    <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px' }}>Ingrediente</span>
-                    <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px', textAlign:'right' }}>Oz</span>
-                    <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px', textAlign:'right' }}>Lb</span>
-                    {resultado.ingredientesCalculados.map((ing, idx) => (
-                      <>
-                        <span key={`n${idx}`} style={{ fontSize:'14px', color: G.texto, padding:'6px 0', borderTop:`1px solid ${G.borde}` }}>{ing.nombre}</span>
-                        <span key={`o${idx}`} style={{ fontSize:'14px', fontWeight:'bold', color: G.cafe, padding:'6px 0', borderTop:`1px solid ${G.borde}`, textAlign:'right' }}>{ing.oz}</span>
-                        <span key={`l${idx}`} style={{ fontSize:'14px', fontWeight:'bold', color: G.texto, padding:'6px 0', borderTop:`1px solid ${G.borde}`, textAlign:'right' }}>{ing.lb}</span>
-                      </>
-                    ))}
+                {resultado.seccionesCalculadas.map((sec, si) => (
+                  <div key={si} style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', borderTop: resultado.seccionesCalculadas.length > 1 ? `3px solid ${si === 0 ? G.cafe : G.verde}` : 'none' }}>
+                    {resultado.seccionesCalculadas.length > 1 && (
+                      <p style={{ fontSize:'13px', fontWeight:'bold', color: si === 0 ? G.cafe : G.verde, marginBottom:'10px', textTransform:'uppercase', letterSpacing:'0.5px' }}>
+                        {si === 0 ? '🍞' : '🥜'} {sec.nombre}
+                      </p>
+                    )}
+                    {resultado.seccionesCalculadas.length === 1 && (
+                      <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>Ingredientes</p>
+                    )}
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr auto auto', gap:'0 12px', alignItems:'center' }}>
+                      <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px' }}>Ingrediente</span>
+                      <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px', textAlign:'right' }}>Oz</span>
+                      <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px', textAlign:'right' }}>Lb</span>
+                      {sec.ingredientes.map((ing, idx) => (
+                        <>
+                          <span key={`n${idx}`} style={{ fontSize:'14px', color: G.texto, padding:'6px 0', borderTop:`1px solid ${G.borde}` }}>{ing.nombre}</span>
+                          <span key={`o${idx}`} style={{ fontSize:'14px', fontWeight:'bold', color: G.cafe, padding:'6px 0', borderTop:`1px solid ${G.borde}`, textAlign:'right' }}>{ing.oz}</span>
+                          <span key={`l${idx}`} style={{ fontSize:'14px', fontWeight:'bold', color: G.texto, padding:'6px 0', borderTop:`1px solid ${G.borde}`, textAlign:'right' }}>{ing.lb}</span>
+                        </>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ))}
 
                 {msgConfirm ? (
                   <div style={{ background: msgConfirm.includes('⚠️') ? '#fee2e2' : '#dcfce7', padding:'14px 16px', borderRadius:'10px', fontSize:'13px', color: msgConfirm.includes('⚠️') ? G.rojo : G.verde }}>
@@ -355,7 +438,7 @@ export default function Recetas({ isAdmin }) {
                 <p style={{ fontWeight:'bold', color: G.cafe, marginBottom:'14px' }}>{editandoId ? '✏️ Editar receta' : '➕ Nueva receta'}</p>
 
                 <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Nombre de la receta</p>
-                <input value={formNombre} onChange={e => setFormNombre(e.target.value)} placeholder="Ej: Masa de Pan Menudo"
+                <input value={formNombre} onChange={e => setFormNombre(e.target.value)} placeholder="Ej: Semita de Piña"
                   style={{ ...inputStyle, marginBottom:'12px' }} />
 
                 <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Grupo</p>
@@ -375,48 +458,131 @@ export default function Recetas({ isAdmin }) {
                   {subgrupos.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
 
-                <p style={{ fontSize:'12px', color: G.gris, marginBottom:'8px' }}>Ingredientes (en onzas)</p>
-                {formIngredientes.map((ing, idx) => {
-                  const sugs = sugerenciasParaIng(idx)
-                  const mostrar = mostrarSugIng[idx] && sugs.length > 0
-                  return (
-                    <div key={idx} style={{ marginBottom:'8px' }}>
-                      <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
-                        <div style={{ position:'relative', flex:2 }}>
-                          <input placeholder="Ingrediente" value={ing.nombre}
-                            onChange={e => { actualizarIngrediente(idx, 'nombre', e.target.value); setMostrarSugIng(prev => ({ ...prev, [idx]: true })) }}
-                            onFocus={() => setMostrarSugIng(prev => ({ ...prev, [idx]: true }))}
-                            onBlur={() => setTimeout(() => setMostrarSugIng(prev => ({ ...prev, [idx]: false })), 150)}
-                            autoCorrect="off" autoCapitalize="off" spellCheck="false"
-                            style={{ ...inputStyle, marginBottom:0 }} />
-                          {mostrar && (
-                            <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:`1px solid ${G.borde}`, borderRadius:'8px', zIndex:50, boxShadow:'0 4px 12px rgba(0,0,0,0.12)', maxHeight:'160px', overflowY:'auto' }}>
-                              {sugs.map(s => (
-                                <div key={s} onClick={() => { actualizarIngrediente(idx, 'nombre', s); setMostrarSugIng(prev => ({ ...prev, [idx]: false })) }}
-                                  style={{ padding:'9px 14px', cursor:'pointer', borderBottom:`1px solid ${G.borde}`, fontSize:'14px', color: G.texto }}
-                                  onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
-                                  onMouseLeave={e => e.currentTarget.style.background = 'white'}>
-                                  {s}
+                {/* Toggle secciones */}
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 14px', background: G.cafeClaro, borderRadius:'10px', marginBottom:'16px', cursor:'pointer' }}
+                  onClick={() => setFormUsaSecciones(!formUsaSecciones)}>
+                  <div>
+                    <p style={{ margin:0, fontSize:'14px', fontWeight:'bold', color: G.cafe }}>Receta con secciones</p>
+                    <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>Ej: Masa + Relleno por separado</p>
+                  </div>
+                  <div style={{ width:'44px', height:'24px', borderRadius:'12px', background: formUsaSecciones ? G.cafe : G.borde, position:'relative', transition:'background 0.2s', flexShrink:0 }}>
+                    <div style={{ position:'absolute', top:'2px', left: formUsaSecciones ? '22px' : '2px', width:'20px', height:'20px', borderRadius:'50%', background:'white', transition:'left 0.2s', boxShadow:'0 1px 3px rgba(0,0,0,0.2)' }} />
+                  </div>
+                </div>
+
+                {/* Modo simple */}
+                {!formUsaSecciones && (
+                  <>
+                    <p style={{ fontSize:'12px', color: G.gris, marginBottom:'8px' }}>Ingredientes (en onzas)</p>
+                    {formIngredientes.map((ing, idx) => {
+                      const sugs = sugerenciasSimple(idx)
+                      const mostrar = mostrarSugIng[`s-${idx}`] && sugs.length > 0
+                      return (
+                        <div key={idx} style={{ marginBottom:'8px' }}>
+                          <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
+                            <div style={{ position:'relative', flex:2 }}>
+                              <input placeholder="Ingrediente" value={ing.nombre}
+                                onChange={e => { actualizarIngrediente(idx, 'nombre', e.target.value); setMostrarSugIng(prev => ({ ...prev, [`s-${idx}`]: true })) }}
+                                onFocus={() => setMostrarSugIng(prev => ({ ...prev, [`s-${idx}`]: true }))}
+                                onBlur={() => setTimeout(() => setMostrarSugIng(prev => ({ ...prev, [`s-${idx}`]: false })), 150)}
+                                autoCorrect="off" autoCapitalize="off" spellCheck="false"
+                                style={{ ...inputStyle, marginBottom:0 }} />
+                              {mostrar && (
+                                <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:`1px solid ${G.borde}`, borderRadius:'8px', zIndex:50, boxShadow:'0 4px 12px rgba(0,0,0,0.12)', maxHeight:'160px', overflowY:'auto' }}>
+                                  {sugs.map(s => (
+                                    <div key={s} onClick={() => { actualizarIngrediente(idx, 'nombre', s); setMostrarSugIng(prev => ({ ...prev, [`s-${idx}`]: false })) }}
+                                      style={{ padding:'9px 14px', cursor:'pointer', borderBottom:`1px solid ${G.borde}`, fontSize:'14px', color: G.texto }}
+                                      onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
+                                      onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                                      {s}
+                                    </div>
+                                  ))}
                                 </div>
-                              ))}
+                              )}
                             </div>
+                            <input type="number" placeholder="Oz" value={ing.oz}
+                              onChange={e => actualizarIngrediente(idx, 'oz', e.target.value)} min="0" step="0.01"
+                              style={{ ...inputStyle, flex:1, marginBottom:0 }} />
+                            {formIngredientes.length > 1 && (
+                              <button onClick={() => quitarIngrediente(idx)}
+                                style={{ padding:'10px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'13px', flexShrink:0 }}>✕</button>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                    <button onClick={agregarIngrediente}
+                      style={{ width:'100%', padding:'9px', background: G.cafeClaro, color: G.cafe, border:`1px dashed ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px', marginBottom:'16px' }}>
+                      ➕ Agregar ingrediente
+                    </button>
+                  </>
+                )}
+
+                {/* Modo secciones */}
+                {formUsaSecciones && (
+                  <>
+                    {formSecciones.map((sec, si) => (
+                      <div key={si} style={{ border:`1px solid ${G.borde}`, borderRadius:'10px', padding:'14px', marginBottom:'12px', background:'#fafaf9' }}>
+                        <div style={{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'12px' }}>
+                          <input placeholder="Nombre de sección (ej: Masa)" value={sec.nombre}
+                            onChange={e => actualizarNombreSeccion(si, e.target.value)}
+                            style={{ ...inputStyle, marginBottom:0, fontWeight:'bold', fontSize:'15px' }} />
+                          {formSecciones.length > 1 && (
+                            <button onClick={() => quitarSeccion(si)}
+                              style={{ padding:'10px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'13px', flexShrink:0 }}>✕</button>
                           )}
                         </div>
-                        <input type="number" placeholder="Oz" value={ing.oz}
-                          onChange={e => actualizarIngrediente(idx, 'oz', e.target.value)} min="0" step="0.01"
-                          style={{ ...inputStyle, flex:1, marginBottom:0 }} />
-                        {formIngredientes.length > 1 && (
-                          <button onClick={() => quitarIngrediente(idx)}
-                            style={{ padding:'10px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'13px', flexShrink:0 }}>✕</button>
-                        )}
+                        <p style={{ fontSize:'12px', color: G.gris, marginBottom:'8px' }}>Ingredientes (en onzas)</p>
+                        {sec.ingredientes.map((ing, ii) => {
+                          const key = `sec-${si}-${ii}`
+                          const sugs = sugerenciasSeccion(si, ii)
+                          const mostrar = mostrarSugIng[key] && sugs.length > 0
+                          return (
+                            <div key={ii} style={{ marginBottom:'8px' }}>
+                              <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
+                                <div style={{ position:'relative', flex:2 }}>
+                                  <input placeholder="Ingrediente" value={ing.nombre}
+                                    onChange={e => { actualizarIngSeccion(si, ii, 'nombre', e.target.value); setMostrarSugIng(prev => ({ ...prev, [key]: true })) }}
+                                    onFocus={() => setMostrarSugIng(prev => ({ ...prev, [key]: true }))}
+                                    onBlur={() => setTimeout(() => setMostrarSugIng(prev => ({ ...prev, [key]: false })), 150)}
+                                    autoCorrect="off" autoCapitalize="off" spellCheck="false"
+                                    style={{ ...inputStyle, marginBottom:0 }} />
+                                  {mostrar && (
+                                    <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:`1px solid ${G.borde}`, borderRadius:'8px', zIndex:50, boxShadow:'0 4px 12px rgba(0,0,0,0.12)', maxHeight:'160px', overflowY:'auto' }}>
+                                      {sugs.map(s => (
+                                        <div key={s} onClick={() => { actualizarIngSeccion(si, ii, 'nombre', s); setMostrarSugIng(prev => ({ ...prev, [key]: false })) }}
+                                          style={{ padding:'9px 14px', cursor:'pointer', borderBottom:`1px solid ${G.borde}`, fontSize:'14px', color: G.texto }}
+                                          onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
+                                          onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                                          {s}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                                <input type="number" placeholder="Oz" value={ing.oz}
+                                  onChange={e => actualizarIngSeccion(si, ii, 'oz', e.target.value)} min="0" step="0.01"
+                                  style={{ ...inputStyle, flex:1, marginBottom:0 }} />
+                                {sec.ingredientes.length > 1 && (
+                                  <button onClick={() => quitarIngSeccion(si, ii)}
+                                    style={{ padding:'10px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'13px', flexShrink:0 }}>✕</button>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                        <button onClick={() => agregarIngSeccion(si)}
+                          style={{ width:'100%', padding:'8px', background: G.cafeClaro, color: G.cafe, border:`1px dashed ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px' }}>
+                          ➕ Ingrediente
+                        </button>
                       </div>
-                    </div>
-                  )
-                })}
-                <button onClick={agregarIngrediente}
-                  style={{ width:'100%', padding:'9px', background: G.cafeClaro, color: G.cafe, border:`1px dashed ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px', marginBottom:'16px' }}>
-                  ➕ Agregar ingrediente
-                </button>
+                    ))}
+                    <button onClick={agregarSeccion}
+                      style={{ width:'100%', padding:'9px', background:'white', color: G.cafe, border:`1px dashed ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px', marginBottom:'16px' }}>
+                      ➕ Agregar sección
+                    </button>
+                  </>
+                )}
 
                 {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize:'13px', marginBottom:'10px' }}>{msg}</p>}
                 <div style={{ display:'flex', gap:'8px' }}>
@@ -432,30 +598,39 @@ export default function Recetas({ isAdmin }) {
               <p style={{ textAlign:'center', color: G.gris, marginTop:'40px', fontSize:'14px' }}>No hay recetas creadas aún.</p>
             )}
 
-            {recetas.map(r => (
-              <div key={r.id} style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'10px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-                {confirmEliminar === r.id ? (
-                  <div>
-                    <p style={{ margin:'0 0 10px', fontSize:'14px', color: G.rojo }}>⚠️ ¿Eliminar "{r.nombre}"?</p>
-                    <div style={{ display:'flex', gap:'8px' }}>
-                      <button onClick={() => setConfirmEliminar(null)} style={{ flex:1, padding:'8px', background: G.borde, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>Cancelar</button>
-                      <button onClick={() => eliminar(r.id)} style={{ flex:1, padding:'8px', background: G.rojo, color:'white', border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>Sí, eliminar</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            {recetas.map(r => {
+              const tieneSecciones = r.secciones && r.secciones.length > 0
+              const totalIng = tieneSecciones
+                ? r.secciones.reduce((acc, s) => acc + (s.ingredientes?.length || 0), 0)
+                : (r.ingredientes?.length || 0)
+              return (
+                <div key={r.id} style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'10px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+                  {confirmEliminar === r.id ? (
                     <div>
-                      <p style={{ margin:0, fontWeight:'bold', fontSize:'15px', color: G.texto }}>{r.nombre}</p>
-                      <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>{r.subgrupo} · {r.ingredientes?.length} ingredientes</p>
+                      <p style={{ margin:'0 0 10px', fontSize:'14px', color: G.rojo }}>⚠️ ¿Eliminar "{r.nombre}"?</p>
+                      <div style={{ display:'flex', gap:'8px' }}>
+                        <button onClick={() => setConfirmEliminar(null)} style={{ flex:1, padding:'8px', background: G.borde, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>Cancelar</button>
+                        <button onClick={() => eliminar(r.id)} style={{ flex:1, padding:'8px', background: G.rojo, color:'white', border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>Sí, eliminar</button>
+                      </div>
                     </div>
-                    <div style={{ display:'flex', gap:'6px' }}>
-                      <button onClick={() => iniciarEdicion(r)} style={{ padding:'7px 12px', background: G.amarilloClaro, color: G.amarillo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✏️</button>
-                      <button onClick={() => setConfirmEliminar(r.id)} style={{ padding:'7px 12px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✕</button>
+                  ) : (
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                      <div>
+                        <p style={{ margin:0, fontWeight:'bold', fontSize:'15px', color: G.texto }}>{r.nombre}</p>
+                        <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>
+                          {r.subgrupo} · {totalIng} ingrediente{totalIng !== 1 ? 's' : ''}
+                          {tieneSecciones && <span style={{ marginLeft:'6px', background: G.cafeClaro, color: G.cafe, padding:'1px 6px', borderRadius:'4px', fontSize:'11px' }}>{r.secciones.length} secciones</span>}
+                        </p>
+                      </div>
+                      <div style={{ display:'flex', gap:'6px' }}>
+                        <button onClick={() => iniciarEdicion(r)} style={{ padding:'7px 12px', background: G.amarilloClaro, color: G.amarillo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✏️</button>
+                        <button onClick={() => setConfirmEliminar(r.id)} style={{ padding:'7px 12px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'7px', cursor:'pointer', fontSize:'13px' }}>✕</button>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              )
+            })}
           </>
         )}
       </div>
