@@ -7,6 +7,7 @@ import GestionGrupos from './GestionGrupos'
 export default function Catalogo() {
   const [grupos, setGrupos] = useState([])
   const [productos, setProductos] = useState([])
+  const [recetas, setRecetas] = useState([])
   const [tabGrupo, setTabGrupo] = useState(null)
   const [nombre, setNombre] = useState('')
   const [medida, setMedida] = useState('')
@@ -24,6 +25,9 @@ export default function Catalogo() {
   const [verListaPrecios, setVerListaPrecios] = useState(false)
   const [menuProducto, setMenuProducto] = useState(null)
   const [confirmEliminarProducto, setConfirmEliminarProducto] = useState(null)
+
+  // Vinculación a recetas compartidas: lista abierta de { recetaId, oz }
+  const [recetasVinculadas, setRecetasVinculadas] = useState([])
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'grupos'), snap => {
@@ -45,19 +49,33 @@ export default function Catalogo() {
   }, [])
 
   useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'recetas'), snap => {
+      setRecetas(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    })
+    return () => unsub()
+  }, [])
+
+  useEffect(() => {
     const subs = [...new Set(productos.filter(p => p.grupoId === grupoId && p.subgrupo).map(p => p.subgrupo))]
     setSugerencias(subs)
   }, [grupoId, productos])
 
   const sugerenciasFiltradas = sugerencias.filter(s => subgrupo === '' || s.toLowerCase().includes(subgrupo.toLowerCase()))
 
+  // Recetas marcadas como compartidas (esBaseCompartida === true) — masa, velo, relleno, etc.
+  const recetasCompartidas = recetas.filter(r => r.esBaseCompartida)
+
   const guardar = async () => {
     if (!nombre.trim() || !medida.trim() || !grupoId) { setMsg('⚠️ Completá todos los campos'); return }
     setGuardando(true)
+    const recetasValidas = recetasVinculadas.filter(rv => rv.recetaId && rv.oz)
     const datos = {
       nombre: nombre.trim(), medida: medida.trim(), grupoId, subgrupo: subgrupo.trim(), activo: true,
       precioUnitario: precioUnitario ? parseFloat(precioUnitario) : 0,
-      precioMayoreo: precioMayoreo ? parseFloat(precioMayoreo) : 0
+      precioMayoreo: precioMayoreo ? parseFloat(precioMayoreo) : 0,
+      recetasVinculadas: recetasValidas.map(rv => ({ recetaId: rv.recetaId, oz: parseFloat(rv.oz) })),
+      // Compatibilidad: limpiar campos antiguos si existían
+      recetaMasaId: '', relleno: null
     }
     if (editando) {
       await updateDoc(doc(db, 'productos', editando.id), datos)
@@ -67,6 +85,7 @@ export default function Catalogo() {
       setMsg('Producto guardado ✅')
     }
     setNombre(''); setMedida(''); setSubgrupo(''); setPrecioUnitario(''); setPrecioMayoreo('')
+    setRecetasVinculadas([])
     setTimeout(() => { setMsg(''); setMostrarForm(false) }, 1500)
     setGuardando(false)
   }
@@ -76,15 +95,38 @@ export default function Catalogo() {
     setSubgrupo(p.subgrupo || ''); setMostrarForm(true); setMenuProducto(null)
     setPrecioUnitario(p.precioUnitario ? p.precioUnitario.toString() : '')
     setPrecioMayoreo(p.precioMayoreo ? p.precioMayoreo.toString() : '')
+    if (p.recetasVinculadas && p.recetasVinculadas.length > 0) {
+      setRecetasVinculadas(p.recetasVinculadas.map(rv => ({ recetaId: rv.recetaId, oz: rv.oz.toString() })))
+    } else if (p.recetaMasaId) {
+      // Compatibilidad con productos creados antes de este cambio
+      setRecetasVinculadas([{ recetaId: p.recetaMasaId, oz: '' }])
+    } else {
+      setRecetasVinculadas([])
+    }
     window.scrollTo(0,0)
   }
   const cancelarEdicion = () => {
     setEditando(null); setNombre(''); setMedida(''); setSubgrupo('')
     setGrupoId(tabGrupo || ''); setMostrarForm(false)
     setPrecioUnitario(''); setPrecioMayoreo('')
+    setRecetasVinculadas([])
   }
   const toggleActivo = async (p) => { await updateDoc(doc(db, 'productos', p.id), { activo: !p.activo }); setMenuProducto(null) }
   const eliminarProducto = async (p) => { await deleteDoc(doc(db, 'productos', p.id)); setConfirmEliminarProducto(null); setMenuProducto(null) }
+
+  // Helpers recetas vinculadas
+  const agregarRecetaVinculada = () => setRecetasVinculadas([...recetasVinculadas, { recetaId: '', oz: '' }])
+  const quitarRecetaVinculada = (idx) => setRecetasVinculadas(recetasVinculadas.filter((_, i) => i !== idx))
+  const actualizarRecetaVinculada = (idx, campo, valor) => {
+    const nuevas = [...recetasVinculadas]
+    nuevas[idx] = { ...nuevas[idx], [campo]: valor }
+    setRecetasVinculadas(nuevas)
+  }
+  // Evita vincular la misma receta dos veces en el mismo producto
+  const recetasDisponiblesPara = (idx) => {
+    const yaUsadas = recetasVinculadas.filter((_, i) => i !== idx).map(rv => rv.recetaId)
+    return recetasCompartidas.filter(r => !yaUsadas.includes(r.id))
+  }
 
   const activos = productos.filter(p => p.activo && p.grupoId === tabGrupo)
   const inactivos = productos.filter(p => !p.activo && p.grupoId === tabGrupo)
@@ -113,6 +155,8 @@ export default function Catalogo() {
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank')
   }
 
+  const nombreReceta = (id) => recetas.find(r => r.id === id)?.nombre || ''
+
   const ProductoCard = ({ p }) => (
     <div style={{ background:'white', padding:'12px 14px', borderRadius:'10px', marginBottom:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
       {confirmEliminarProducto === p.id ? (
@@ -137,13 +181,18 @@ export default function Catalogo() {
           <div style={{ flex:1, marginRight:'10px' }}>
             <p style={{ margin:0, fontWeight:'bold', color: G.texto, fontSize:'15px' }}>{p.nombre}</p>
             <p style={{ margin:0, fontSize:'12px', color: G.gris, marginTop:'2px' }}>{p.medida}</p>
-            <div style={{ display:'flex', gap:'8px', marginTop:'4px', flexWrap:'wrap' }}>
+            <div style={{ display:'flex', gap:'8px', marginTop:'4px', flexWrap:'wrap', alignItems:'center' }}>
               {formatPrecio(p.precioUnitario) && (
                 <span style={{ fontSize:'12px', color: G.cafe, fontWeight:'bold' }}>{formatPrecio(p.precioUnitario)} unit.</span>
               )}
               {formatPrecio(p.precioMayoreo) && (
                 <span style={{ fontSize:'12px', color: G.gris }}>{formatPrecio(p.precioMayoreo)} may.</span>
               )}
+              {p.recetasVinculadas?.length > 0 && p.recetasVinculadas.map(rv => (
+                <span key={rv.recetaId} style={{ fontSize:'11px', background: G.cafeClaro, color: G.cafe, padding:'2px 7px', borderRadius:'5px' }}>
+                  🍞 {nombreReceta(rv.recetaId)} ({rv.oz}oz)
+                </span>
+              ))}
             </div>
           </div>
           <div style={{ display:'flex', gap:'6px' }}>
@@ -282,6 +331,45 @@ export default function Catalogo() {
                       style={{ ...inputStyle, marginBottom:'14px' }} />
                   </div>
                 </div>
+
+                {/* Vinculación a recetas compartidas (masa, velo, relleno, etc.) */}
+                {recetasCompartidas.length > 0 && (
+                  <div style={{ marginBottom:'14px' }}>
+                    <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Recetas vinculadas (opcional)</p>
+                    <p style={{ fontSize:'11px', color: G.gris, marginBottom:'8px', opacity:0.8 }}>Cada receta lleva el peso en oz que le corresponde a 1 unidad de este producto</p>
+
+                    {recetasVinculadas.map((rv, idx) => {
+                      const opciones = recetasDisponiblesPara(idx)
+                      return (
+                        <div key={idx} style={{ display:'flex', gap:'6px', alignItems:'center', marginBottom:'8px' }}>
+                          <select value={rv.recetaId} onChange={e => actualizarRecetaVinculada(idx, 'recetaId', e.target.value)}
+                            style={{ ...inputStyle, marginBottom:0, flex:2 }}>
+                            <option value=''>Seleccioná receta...</option>
+                            {rv.recetaId && !opciones.find(o => o.id === rv.recetaId) && (
+                              <option value={rv.recetaId}>🍞 {nombreReceta(rv.recetaId)}</option>
+                            )}
+                            {opciones.map(r => (
+                              <option key={r.id} value={r.id}>🍞 {r.nombre}</option>
+                            ))}
+                          </select>
+                          <input type="number" placeholder="Oz" value={rv.oz}
+                            onChange={e => actualizarRecetaVinculada(idx, 'oz', e.target.value)} min="0" step="0.01"
+                            style={{ ...inputStyle, flex:1, marginBottom:0 }} />
+                          <button type="button" onClick={() => quitarRecetaVinculada(idx)}
+                            style={{ padding:'10px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'13px', flexShrink:0 }}>✕</button>
+                        </div>
+                      )
+                    })}
+
+                    {recetasVinculadas.length < recetasCompartidas.length && (
+                      <button type="button" onClick={agregarRecetaVinculada}
+                        style={{ width:'100%', padding:'9px', background: G.cafeClaro, color: G.cafe, border:`1px dashed ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px' }}>
+                        ➕ Vincular receta
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {msg && <p style={{ color: msg.includes('⚠️') ? G.rojo : G.verde, fontSize:'13px', marginBottom:'10px' }}>{msg}</p>}
                 <div style={{ display:'flex', gap:'8px' }}>
                   <button onClick={cancelarEdicion} style={{ flex:1, padding:'11px', background: G.borde, color: G.texto, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'14px' }}>Cancelar</button>

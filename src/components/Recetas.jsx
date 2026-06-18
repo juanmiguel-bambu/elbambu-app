@@ -36,6 +36,9 @@ export default function Recetas({ isAdmin }) {
   const [formIngredientes, setFormIngredientes] = useState([{ nombre: '', oz: '' }])
   // Modo con secciones: array de {nombre, ingredientes}
   const [formSecciones, setFormSecciones] = useState([seccionVacia('Masa'), seccionVacia('Relleno')])
+  // Marca esta receta como receta compartida por varios productos del catálogo
+  const [formEsBaseCompartida, setFormEsBaseCompartida] = useState(false)
+  const [productos, setProductos] = useState([])
 
   const [editandoId, setEditandoId] = useState(null)
   const [guardando, setGuardando] = useState(false)
@@ -65,7 +68,9 @@ export default function Recetas({ isAdmin }) {
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'productos'), snap => {
-      const subs = [...new Set(snap.docs.map(d => d.data().subgrupo).filter(Boolean))]
+      const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      setProductos(lista)
+      const subs = [...new Set(lista.map(p => p.subgrupo).filter(Boolean))]
       setSubgrupos(subs.sort())
     })
     return () => unsub()
@@ -91,10 +96,70 @@ export default function Recetas({ isAdmin }) {
   const calcular = (receta) => {
     setRecetaSeleccionada(receta)
     setMsgConfirm('')
-    let totalFactor = 0
-    const detalle = {}
 
     const pedidosFiltrados = pedidosHoy.filter(p => (p.turnoEntrega || 'manana') === turnoFiltro)
+
+    // ── Caso 1: receta es compartida por varios productos del catálogo (masa, velo, relleno, etc.) ──
+    if (receta.esBaseCompartida) {
+      // Productos que vinculan esta receta, junto con el peso (oz) que le corresponde a 1 unidad
+      const productosVinculados = productos
+        .map(p => {
+          const vinculo = p.recetasVinculadas?.find(rv => rv.recetaId === receta.id)
+          return vinculo ? { producto: p, ozPorUnidad: Number(vinculo.oz) } : null
+        })
+        .filter(Boolean)
+      const idsVinculados = new Map(productosVinculados.map(v => [v.producto.id, v.ozPorUnidad]))
+
+      let totalOz = 0
+      const detalle = {}
+
+      pedidosFiltrados.forEach(pedido => {
+        pedido.items?.forEach(item => {
+          if (!idsVinculados.has(item.productoId)) return
+          const cantidad = Number(item.cantidad)
+          const ozPorUnidad = idsVinculados.get(item.productoId)
+          totalOz += cantidad * ozPorUnidad
+          const key = `${item.nombre} (${item.medida})`
+          detalle[key] = (detalle[key] || 0) + cantidad
+        })
+      })
+
+      if (totalOz === 0) {
+        setResultado({ vacio: true, receta })
+        return
+      }
+
+      // Esta receta puede estar guardada como lista plana o con secciones; tomamos sus ingredientes
+      const recetaIngredientes = receta.ingredientes && receta.ingredientes.length > 0
+        ? receta.ingredientes
+        : (receta.secciones?.[0]?.ingredientes || [])
+      const ozBaseReceta = recetaIngredientes.reduce((acc, i) => acc + Number(i.oz || 0), 0)
+      const factor = ozBaseReceta > 0 ? totalOz / ozBaseReceta : 0
+
+      const seccionesCalculadas = [{
+        nombre: receta.nombre,
+        ingredientes: recetaIngredientes.map(i => {
+          const ozTotal = Number(i.oz) * factor
+          return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: (ozTotal / 16).toFixed(3) }
+        })
+      }]
+
+      setResultado({
+        vacio: false, receta,
+        totalFactor: totalOz.toFixed(2),
+        masaBaseOz: ozBaseReceta.toFixed(2),
+        factor: factor.toFixed(4),
+        usaPeso: true, turnoFiltro,
+        seccionesCalculadas,
+        detalle,
+        esBaseCompartida: true
+      })
+      return
+    }
+
+    // ── Caso 2: receta normal, vinculada por subgrupo (comportamiento original) ──
+    let totalFactor = 0
+    const detalle = {}
 
     pedidosFiltrados.forEach(pedido => {
       pedido.items?.forEach(item => {
@@ -120,6 +185,7 @@ export default function Recetas({ isAdmin }) {
     const secciones = normalizarSecciones(receta)
     const usaPeso = Object.keys(detalle).some(k => esUnidadPeso(k))
 
+    // Calcular factor basado en la primera sección (masa base)
     const masaBaseOz = secciones[0]?.ingredientes?.reduce((acc, i) => acc + Number(i.oz || 0), 0) || 0
     const factor = usaPeso ? totalFactor / masaBaseOz : totalFactor
 
@@ -148,6 +214,7 @@ export default function Recetas({ isAdmin }) {
     try {
       const actualizados = []
       const noEncontrados = []
+      // Recolectar todos los ingredientes de todas las secciones
       const todosLosIngredientes = resultado.seccionesCalculadas.flatMap(sec => sec.ingredientes)
       for (const ing of todosLosIngredientes) {
         const materia = inventario.find(m => m.nombre.toLowerCase().trim() === ing.nombre.toLowerCase().trim())
@@ -175,12 +242,21 @@ export default function Recetas({ isAdmin }) {
     setConfirmando(false)
   }
 
+  // ── Form helpers ──────────────────────────────────────────────
+
   const guardarReceta = async () => {
-    if (!formNombre.trim() || !formGrupoId || !formSubgrupo.trim()) { setMsg('⚠️ Completá nombre, grupo y subgrupo'); return }
+    if (!formNombre.trim() || !formGrupoId) { setMsg('⚠️ Completá nombre y grupo'); return }
+    if (!formEsBaseCompartida && !formSubgrupo.trim()) { setMsg('⚠️ Completá el subgrupo'); return }
 
-    let datos = { nombre: formNombre.trim(), grupoId: formGrupoId, subgrupo: formSubgrupo.trim() }
+    let datos = { nombre: formNombre.trim(), grupoId: formGrupoId, subgrupo: formSubgrupo.trim(), esBaseCompartida: formEsBaseCompartida }
 
-    if (formUsaSecciones) {
+    if (formEsBaseCompartida) {
+      // Masa base compartida: siempre lista plana de ingredientes (sin secciones)
+      const ingValidos = formIngredientes.filter(i => i.nombre.trim() && i.oz)
+      if (ingValidos.length === 0) { setMsg('⚠️ Agregá al menos un ingrediente de la masa'); return }
+      datos.ingredientes = ingValidos.map(i => ({ nombre: i.nombre.trim(), oz: parseFloat(i.oz) }))
+      datos.secciones = []
+    } else if (formUsaSecciones) {
       const seccionesValidas = formSecciones
         .map(sec => ({ nombre: sec.nombre.trim(), ingredientes: sec.ingredientes.filter(i => i.nombre.trim() && i.oz) }))
         .filter(sec => sec.nombre && sec.ingredientes.length > 0)
@@ -189,6 +265,7 @@ export default function Recetas({ isAdmin }) {
         nombre: sec.nombre,
         ingredientes: sec.ingredientes.map(i => ({ nombre: i.nombre.trim(), oz: parseFloat(i.oz) }))
       }))
+      // Limpiar campo ingredientes si existía antes
       datos.ingredientes = []
     } else {
       const ingValidos = formIngredientes.filter(i => i.nombre.trim() && i.oz)
@@ -215,13 +292,15 @@ export default function Recetas({ isAdmin }) {
     setFormIngredientes([{ nombre: '', oz: '' }])
     setFormSecciones([seccionVacia('Masa'), seccionVacia('Relleno')])
     setFormUsaSecciones(false)
+    setFormEsBaseCompartida(false)
     setEditandoId(null); setMostrarForm(false); setMostrarSugIng({})
   }
 
   const iniciarEdicion = (r) => {
     setFormNombre(r.nombre)
     setFormGrupoId(r.grupoId)
-    setFormSubgrupo(r.subgrupo)
+    setFormSubgrupo(r.subgrupo || '')
+    setFormEsBaseCompartida(!!r.esBaseCompartida)
     const tieneSecciones = r.secciones && r.secciones.length > 0
     setFormUsaSecciones(tieneSecciones)
     if (tieneSecciones) {
@@ -241,6 +320,8 @@ export default function Recetas({ isAdmin }) {
     setConfirmEliminar(null)
   }
 
+  // ── Ingredientes (modo simple) ────────────────────────────────
+
   const agregarIngrediente = () => setFormIngredientes([...formIngredientes, { nombre: '', oz: '' }])
   const quitarIngrediente = (idx) => setFormIngredientes(formIngredientes.filter((_, i) => i !== idx))
   const actualizarIngrediente = (idx, campo, valor) => {
@@ -248,6 +329,8 @@ export default function Recetas({ isAdmin }) {
     nuevos[idx][campo] = valor
     setFormIngredientes(nuevos)
   }
+
+  // ── Secciones (modo avanzado) ─────────────────────────────────
 
   const agregarSeccion = () => setFormSecciones([...formSecciones, seccionVacia()])
   const quitarSeccion = (si) => setFormSecciones(formSecciones.filter((_, i) => i !== si))
@@ -274,6 +357,8 @@ export default function Recetas({ isAdmin }) {
     setFormSecciones(nuevas)
   }
 
+  // ── Sugerencias inventario ────────────────────────────────────
+
   const sugerenciasSimple = (idx) => {
     const texto = formIngredientes[idx]?.nombre || ''
     if (!texto.trim()) return []
@@ -285,12 +370,48 @@ export default function Recetas({ isAdmin }) {
     return inventario.map(m => m.nombre).filter(n => n.toLowerCase().includes(texto.toLowerCase())).sort()
   }
 
+  // ── Styles ────────────────────────────────────────────────────
+
   const inputStyle = { width:'100%', padding:'10px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto, fontSize:'14px' }
 
   const subTabs = [
     { key:'calcular', label:'🧮 Calcular' },
     ...(isAdmin ? [{ key:'gestionar', label:'⚙️ Gestionar' }] : [])
   ]
+
+  const renderIngredienteRow = (ing, idx, onChange, onQuitar, sugs, mostrar, onFocus, onBlur, onSelectSug) => (
+    <div key={idx} style={{ marginBottom:'8px' }}>
+      <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
+        <div style={{ position:'relative', flex:2 }}>
+          <input placeholder="Ingrediente" value={ing.nombre}
+            onChange={e => onChange(idx, 'nombre', e.target.value)}
+            onFocus={() => onFocus(idx)}
+            onBlur={() => setTimeout(() => onBlur(idx), 150)}
+            autoCorrect="off" autoCapitalize="off" spellCheck="false"
+            style={{ ...inputStyle, marginBottom:0 }} />
+          {mostrar && sugs.length > 0 && (
+            <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:`1px solid ${G.borde}`, borderRadius:'8px', zIndex:50, boxShadow:'0 4px 12px rgba(0,0,0,0.12)', maxHeight:'160px', overflowY:'auto' }}>
+              {sugs.map(s => (
+                <div key={s} onClick={() => onSelectSug(idx, s)}
+                  style={{ padding:'9px 14px', cursor:'pointer', borderBottom:`1px solid ${G.borde}`, fontSize:'14px', color: G.texto }}
+                  onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
+                  onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                  {s}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <input type="number" placeholder="Oz" value={ing.oz}
+          onChange={e => onChange(idx, 'oz', e.target.value)} min="0" step="0.01"
+          style={{ ...inputStyle, flex:1, marginBottom:0 }} />
+        <button onClick={() => onQuitar(idx)}
+          style={{ padding:'10px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'13px', flexShrink:0 }}>✕</button>
+      </div>
+    </div>
+  )
+
+  // ── Render ────────────────────────────────────────────────────
 
   return (
     <div style={{ maxWidth:'520px', margin:'0 auto' }}>
@@ -312,6 +433,7 @@ export default function Recetas({ isAdmin }) {
 
       <div style={{ padding:'16px' }}>
 
+        {/* ── TAB CALCULAR ── */}
         {tab === 'calcular' && (
           <>
             <h3 style={{ color: G.cafe, marginBottom:'16px' }}>🧮 Calcular receta</h3>
@@ -356,22 +478,26 @@ export default function Recetas({ isAdmin }) {
 
             {resultado?.vacio && (
               <div style={{ background:'white', padding:'16px', borderRadius:'10px', textAlign:'center', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-                <p style={{ color: G.gris, fontSize:'14px' }}>No hay pedidos de turno <strong>{turnoFiltro === 'manana' ? 'Mañana' : 'Tarde'}</strong> para el subgrupo <strong>{resultado.receta.subgrupo}</strong>.</p>
+                <p style={{ color: G.gris, fontSize:'14px' }}>
+                  No hay pedidos de turno <strong>{turnoFiltro === 'manana' ? 'Mañana' : 'Tarde'}</strong> para {resultado.receta.esBaseCompartida ? 'los productos que vinculan' : 'el subgrupo de'} <strong>{resultado.receta.nombre}</strong>.
+                </p>
               </div>
             )}
 
             {resultado && !resultado.vacio && (
               <>
+                {/* Header resultado */}
                 <div style={{ background: G.cafe, color:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px' }}>
                   <p style={{ margin:0, fontWeight:'bold', fontSize:'16px' }}>{resultado.receta.nombre}</p>
                   <p style={{ margin:'4px 0 0', fontSize:'13px', opacity:0.85 }}>
-                    Turno: {resultado.turnoFiltro === 'manana' ? '🌅 Mañana' : '🌇 Tarde'} · Subgrupo: {resultado.receta.subgrupo}
+                    Turno: {resultado.turnoFiltro === 'manana' ? '🌅 Mañana' : '🌇 Tarde'}{resultado.esBaseCompartida ? ' · Receta compartida' : ` · Subgrupo: ${resultado.receta.subgrupo}`}
                   </p>
                   <p style={{ margin:'2px 0 0', fontSize:'13px', opacity:0.85 }}>
                     {resultado.usaPeso ? `Masa necesaria: ${resultado.totalFactor} oz` : `Total: ${resultado.totalFactor} unidades`} · Factor: ×{resultado.factor}
                   </p>
                 </div>
 
+                {/* Pedidos incluidos */}
                 <div style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
                   <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>Pedidos incluidos</p>
                   {Object.entries(resultado.detalle).map(([nombre, cant]) => (
@@ -382,6 +508,7 @@ export default function Recetas({ isAdmin }) {
                   ))}
                 </div>
 
+                {/* Secciones de ingredientes */}
                 {resultado.seccionesCalculadas.map((sec, si) => (
                   <div key={si} style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', borderTop: resultado.seccionesCalculadas.length > 1 ? `3px solid ${si === 0 ? G.cafe : G.verde}` : 'none' }}>
                     {resultado.seccionesCalculadas.length > 1 && (
@@ -407,6 +534,7 @@ export default function Recetas({ isAdmin }) {
                   </div>
                 ))}
 
+                {/* Confirmar producción */}
                 {msgConfirm ? (
                   <div style={{ background: msgConfirm.includes('⚠️') ? '#fee2e2' : '#dcfce7', padding:'14px 16px', borderRadius:'10px', fontSize:'13px', color: msgConfirm.includes('⚠️') ? G.rojo : G.verde }}>
                     {msgConfirm}
@@ -422,6 +550,7 @@ export default function Recetas({ isAdmin }) {
           </>
         )}
 
+        {/* ── TAB GESTIONAR ── */}
         {tab === 'gestionar' && isAdmin && (
           <>
             <h3 style={{ color: G.cafe, marginBottom:'16px' }}>⚙️ Gestionar recetas</h3>
@@ -451,24 +580,46 @@ export default function Recetas({ isAdmin }) {
                   ))}
                 </div>
 
-                <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Subgrupo vinculado</p>
-                <select value={formSubgrupo} onChange={e => setFormSubgrupo(e.target.value)}
-                  style={{ ...inputStyle, marginBottom:'16px' }}>
-                  <option value=''>Seleccioná un subgrupo...</option>
-                  {subgrupos.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-
-                {/* Toggle secciones */}
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 14px', background: G.cafeClaro, borderRadius:'10px', marginBottom:'16px', cursor:'pointer' }}
-                  onClick={() => setFormUsaSecciones(!formUsaSecciones)}>
+                {/* Toggle masa base compartida */}
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 14px', background:'#fdf3e7', borderRadius:'10px', marginBottom:'16px', cursor:'pointer', border:'1px solid #f0d9b5' }}
+                  onClick={() => { setFormEsBaseCompartida(!formEsBaseCompartida); setFormUsaSecciones(false) }}>
                   <div>
-                    <p style={{ margin:0, fontSize:'14px', fontWeight:'bold', color: G.cafe }}>Receta con secciones</p>
-                    <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>Ej: Masa + Relleno por separado</p>
+                    <p style={{ margin:0, fontSize:'14px', fontWeight:'bold', color: G.cafe }}>🍞 Es receta compartida por varios productos</p>
+                    <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>Ej: Masa Chibola (Novias, Torta Seca) o Velo de Novia</p>
                   </div>
-                  <div style={{ width:'44px', height:'24px', borderRadius:'12px', background: formUsaSecciones ? G.cafe : G.borde, position:'relative', transition:'background 0.2s', flexShrink:0 }}>
-                    <div style={{ position:'absolute', top:'2px', left: formUsaSecciones ? '22px' : '2px', width:'20px', height:'20px', borderRadius:'50%', background:'white', transition:'left 0.2s', boxShadow:'0 1px 3px rgba(0,0,0,0.2)' }} />
+                  <div style={{ width:'44px', height:'24px', borderRadius:'12px', background: formEsBaseCompartida ? G.cafe : G.borde, position:'relative', transition:'background 0.2s', flexShrink:0 }}>
+                    <div style={{ position:'absolute', top:'2px', left: formEsBaseCompartida ? '22px' : '2px', width:'20px', height:'20px', borderRadius:'50%', background:'white', transition:'left 0.2s', boxShadow:'0 1px 3px rgba(0,0,0,0.2)' }} />
                   </div>
                 </div>
+
+                {formEsBaseCompartida && (
+                  <div style={{ background:'#fdf3e7', border:'1px solid #f0d9b5', borderRadius:'10px', padding:'12px 14px', marginBottom:'16px', fontSize:'13px', color: G.cafe }}>
+                    💡 Después de guardar, andá a <strong>Catálogo</strong> y vinculá cada producto que la use, indicando cuántas oz de esta receta le corresponden a 1 unidad. Un producto puede vincular varias recetas (ej: masa + velo).
+                  </div>
+                )}
+
+                {!formEsBaseCompartida && (
+                  <>
+                    <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Subgrupo vinculado</p>
+                    <select value={formSubgrupo} onChange={e => setFormSubgrupo(e.target.value)}
+                      style={{ ...inputStyle, marginBottom:'16px' }}>
+                      <option value=''>Seleccioná un subgrupo...</option>
+                      {subgrupos.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+
+                    {/* Toggle secciones */}
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 14px', background: G.cafeClaro, borderRadius:'10px', marginBottom:'16px', cursor:'pointer' }}
+                      onClick={() => setFormUsaSecciones(!formUsaSecciones)}>
+                      <div>
+                        <p style={{ margin:0, fontSize:'14px', fontWeight:'bold', color: G.cafe }}>Receta con secciones</p>
+                        <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>Ej: Masa + Relleno por separado</p>
+                      </div>
+                      <div style={{ width:'44px', height:'24px', borderRadius:'12px', background: formUsaSecciones ? G.cafe : G.borde, position:'relative', transition:'background 0.2s', flexShrink:0 }}>
+                        <div style={{ position:'absolute', top:'2px', left: formUsaSecciones ? '22px' : '2px', width:'20px', height:'20px', borderRadius:'50%', background:'white', transition:'left 0.2s', boxShadow:'0 1px 3px rgba(0,0,0,0.2)' }} />
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* Modo simple */}
                 {!formUsaSecciones && (
@@ -477,38 +628,14 @@ export default function Recetas({ isAdmin }) {
                     {formIngredientes.map((ing, idx) => {
                       const sugs = sugerenciasSimple(idx)
                       const mostrar = mostrarSugIng[`s-${idx}`] && sugs.length > 0
-                      return (
-                        <div key={idx} style={{ marginBottom:'8px' }}>
-                          <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
-                            <div style={{ position:'relative', flex:2 }}>
-                              <input placeholder="Ingrediente" value={ing.nombre}
-                                onChange={e => { actualizarIngrediente(idx, 'nombre', e.target.value); setMostrarSugIng(prev => ({ ...prev, [`s-${idx}`]: true })) }}
-                                onFocus={() => setMostrarSugIng(prev => ({ ...prev, [`s-${idx}`]: true }))}
-                                onBlur={() => setTimeout(() => setMostrarSugIng(prev => ({ ...prev, [`s-${idx}`]: false })), 150)}
-                                autoCorrect="off" autoCapitalize="off" spellCheck="false"
-                                style={{ ...inputStyle, marginBottom:0 }} />
-                              {mostrar && (
-                                <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:`1px solid ${G.borde}`, borderRadius:'8px', zIndex:50, boxShadow:'0 4px 12px rgba(0,0,0,0.12)', maxHeight:'160px', overflowY:'auto' }}>
-                                  {sugs.map(s => (
-                                    <div key={s} onClick={() => { actualizarIngrediente(idx, 'nombre', s); setMostrarSugIng(prev => ({ ...prev, [`s-${idx}`]: false })) }}
-                                      style={{ padding:'9px 14px', cursor:'pointer', borderBottom:`1px solid ${G.borde}`, fontSize:'14px', color: G.texto }}
-                                      onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
-                                      onMouseLeave={e => e.currentTarget.style.background = 'white'}>
-                                      {s}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            <input type="number" placeholder="Oz" value={ing.oz}
-                              onChange={e => actualizarIngrediente(idx, 'oz', e.target.value)} min="0" step="0.01"
-                              style={{ ...inputStyle, flex:1, marginBottom:0 }} />
-                            {formIngredientes.length > 1 && (
-                              <button onClick={() => quitarIngrediente(idx)}
-                                style={{ padding:'10px', background:'#fee2e2', color: G.rojo, border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'13px', flexShrink:0 }}>✕</button>
-                            )}
-                          </div>
-                        </div>
+                      return renderIngredienteRow(
+                        ing, idx,
+                        actualizarIngrediente,
+                        quitarIngrediente,
+                        sugs, mostrar,
+                        (i) => setMostrarSugIng(prev => ({ ...prev, [`s-${i}`]: true })),
+                        (i) => setMostrarSugIng(prev => ({ ...prev, [`s-${i}`]: false })),
+                        (i, s) => { actualizarIngrediente(i, 'nombre', s); setMostrarSugIng(prev => ({ ...prev, [`s-${i}`]: false })) }
                       )
                     })}
                     <button onClick={agregarIngrediente}
@@ -524,7 +651,7 @@ export default function Recetas({ isAdmin }) {
                     {formSecciones.map((sec, si) => (
                       <div key={si} style={{ border:`1px solid ${G.borde}`, borderRadius:'10px', padding:'14px', marginBottom:'12px', background:'#fafaf9' }}>
                         <div style={{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'12px' }}>
-                          <input placeholder="Nombre de sección (ej: Masa)" value={sec.nombre}
+                          <input placeholder={`Nombre de sección (ej: Masa)`} value={sec.nombre}
                             onChange={e => actualizarNombreSeccion(si, e.target.value)}
                             style={{ ...inputStyle, marginBottom:0, fontWeight:'bold', fontSize:'15px' }} />
                           {formSecciones.length > 1 && (
@@ -618,8 +745,9 @@ export default function Recetas({ isAdmin }) {
                       <div>
                         <p style={{ margin:0, fontWeight:'bold', fontSize:'15px', color: G.texto }}>{r.nombre}</p>
                         <p style={{ margin:'2px 0 0', fontSize:'12px', color: G.gris }}>
-                          {r.subgrupo} · {totalIng} ingrediente{totalIng !== 1 ? 's' : ''}
+                          {r.esBaseCompartida ? 'Receta compartida' : r.subgrupo} · {totalIng} ingrediente{totalIng !== 1 ? 's' : ''}
                           {tieneSecciones && <span style={{ marginLeft:'6px', background: G.cafeClaro, color: G.cafe, padding:'1px 6px', borderRadius:'4px', fontSize:'11px' }}>{r.secciones.length} secciones</span>}
+                          {r.esBaseCompartida && <span style={{ marginLeft:'6px', background:'#fdf3e7', color: G.cafe, padding:'1px 6px', borderRadius:'4px', fontSize:'11px' }}>🍞 compartida</span>}
                         </p>
                       </div>
                       <div style={{ display:'flex', gap:'6px' }}>
