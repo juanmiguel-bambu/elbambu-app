@@ -20,6 +20,7 @@ const HORARIOS_TURNO = {
 
 export default function Recetas({ isAdmin }) {
   const [tab, setTab] = useState('calcular')
+  const [modoCalculo, setModoCalculo] = useState('pedidos') // 'pedidos' | 'libre'
   const [recetas, setRecetas] = useState([])
   const [grupos, setGrupos] = useState([])
   const [subgrupos, setSubgrupos] = useState([])
@@ -31,6 +32,13 @@ export default function Recetas({ isAdmin }) {
   const [confirmando, setConfirmando] = useState(false)
   const [msgConfirm, setMsgConfirm] = useState('')
   const [turnoConfirmado, setTurnoConfirmado] = useState(false)
+
+  // Modo libre
+  const [recetaLibre, setRecetaLibre] = useState(null)
+  const [cantidadesLibres, setCantidadesLibres] = useState({}) // productoId -> cantidad, o 'oz' -> cantidad
+  const [resultadoLibre, setResultadoLibre] = useState(null)
+  const [msgConfirmLibre, setMsgConfirmLibre] = useState('')
+  const [confirmandoLibre, setConfirmandoLibre] = useState(false)
 
   const [formNombre, setFormNombre] = useState('')
   const [formGrupoId, setFormGrupoId] = useState('')
@@ -100,10 +108,6 @@ export default function Recetas({ isAdmin }) {
     setMsgConfirm('')
   }
 
-  const confirmarTurno = () => {
-    setTurnoConfirmado(true)
-  }
-
   const esUnidadPeso = (medida) => /oz|lb|g\b|kg/i.test(medida || '')
 
   const calcular = (receta) => {
@@ -135,24 +139,12 @@ export default function Recetas({ isAdmin }) {
         })
       })
 
-      if (totalOz === 0) {
-        setResultado({ vacio: true, receta })
-        return
-      }
+      if (totalOz === 0) { setResultado({ vacio: true, receta }); return }
 
       const recetaIngredientes = receta.ingredientes && receta.ingredientes.length > 0
-        ? receta.ingredientes
-        : (receta.secciones?.[0]?.ingredientes || [])
+        ? receta.ingredientes : (receta.secciones?.[0]?.ingredientes || [])
       const ozBaseReceta = recetaIngredientes.reduce((acc, i) => acc + Number(i.oz || 0), 0)
       const factor = ozBaseReceta > 0 ? totalOz / ozBaseReceta : 0
-
-      const seccionesCalculadas = [{
-        nombre: receta.nombre,
-        ingredientes: recetaIngredientes.map(i => {
-          const ozTotal = Number(i.oz) * factor
-          return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: (ozTotal / 16).toFixed(3) }
-        })
-      }]
 
       setResultado({
         vacio: false, receta,
@@ -160,8 +152,8 @@ export default function Recetas({ isAdmin }) {
         masaBaseOz: ozBaseReceta.toFixed(2),
         factor: factor.toFixed(4),
         usaPeso: true, turnoFiltro,
-        seccionesCalculadas, detalle,
-        esBaseCompartida: true
+        seccionesCalculadas: [{ nombre: receta.nombre, ingredientes: recetaIngredientes.map(i => { const ozTotal = Number(i.oz) * factor; return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: (ozTotal / 16).toFixed(3) } }) }],
+        detalle, esBaseCompartida: true
       })
       return
     }
@@ -185,23 +177,12 @@ export default function Recetas({ isAdmin }) {
       })
     })
 
-    if (totalFactor === 0) {
-      setResultado({ vacio: true, receta })
-      return
-    }
+    if (totalFactor === 0) { setResultado({ vacio: true, receta }); return }
 
     const secciones = normalizarSecciones(receta)
     const usaPeso = Object.keys(detalle).some(k => esUnidadPeso(k))
     const masaBaseOz = secciones[0]?.ingredientes?.reduce((acc, i) => acc + Number(i.oz || 0), 0) || 0
     const factor = usaPeso ? totalFactor / masaBaseOz : totalFactor
-
-    const seccionesCalculadas = secciones.map(sec => ({
-      nombre: sec.nombre,
-      ingredientes: sec.ingredientes.map(i => {
-        const ozTotal = Number(i.oz) * factor
-        return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: (ozTotal / 16).toFixed(3) }
-      })
-    }))
 
     setResultado({
       vacio: false, receta,
@@ -209,9 +190,140 @@ export default function Recetas({ isAdmin }) {
       masaBaseOz: masaBaseOz.toFixed(2),
       factor: factor.toFixed(4),
       usaPeso, turnoFiltro,
-      seccionesCalculadas, detalle
+      seccionesCalculadas: secciones.map(sec => ({ nombre: sec.nombre, ingredientes: sec.ingredientes.map(i => { const ozTotal = Number(i.oz) * factor; return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: (ozTotal / 16).toFixed(3) } }) })),
+      detalle
     })
   }
+
+  // ── MODO LIBRE ────────────────────────────────────────────────
+
+  const seleccionarRecetaLibre = (receta) => {
+    setRecetaLibre(receta)
+    setCantidadesLibres({})
+    setResultadoLibre(null)
+    setMsgConfirmLibre('')
+  }
+
+  const productosDeReceta = (receta) => {
+    if (!receta) return []
+    if (receta.esBaseCompartida) {
+      return productos.filter(p => p.recetasVinculadas?.some(rv => rv.recetaId === receta.id) && p.activo)
+    }
+    return productos.filter(p => (p.subgrupo || '').toLowerCase() === (receta.subgrupo || '').toLowerCase() && p.activo)
+  }
+
+  const calcularLibre = () => {
+    if (!recetaLibre) return
+    setMsgConfirmLibre('')
+
+    const prods = productosDeReceta(recetaLibre)
+
+    if (recetaLibre.esBaseCompartida) {
+      let totalOz = 0
+      const detalle = {}
+      prods.forEach(p => {
+        const cant = Number(cantidadesLibres[p.id] || 0)
+        if (cant <= 0) return
+        const vinculo = p.recetasVinculadas?.find(rv => rv.recetaId === recetaLibre.id)
+        const ozPorUnidad = vinculo ? Number(vinculo.oz) : 0
+        totalOz += cant * ozPorUnidad
+        detalle[`${p.nombre} (${p.medida})`] = cant
+      })
+      if (totalOz === 0) { setResultadoLibre({ vacio: true }); return }
+
+      const recetaIngredientes = recetaLibre.ingredientes?.length > 0
+        ? recetaLibre.ingredientes : (recetaLibre.secciones?.[0]?.ingredientes || [])
+      const ozBase = recetaIngredientes.reduce((acc, i) => acc + Number(i.oz || 0), 0)
+      const factor = ozBase > 0 ? totalOz / ozBase : 0
+
+      setResultadoLibre({
+        vacio: false, receta: recetaLibre,
+        totalFactor: totalOz.toFixed(2), factor: factor.toFixed(4), usaPeso: true,
+        seccionesCalculadas: [{ nombre: recetaLibre.nombre, ingredientes: recetaIngredientes.map(i => { const ozTotal = Number(i.oz) * factor; return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: (ozTotal / 16).toFixed(3) } }) }],
+        detalle
+      })
+      return
+    }
+
+    // Receta normal — detectar si es por oz o por unidades
+    const tieneProductosPeso = prods.some(p => esUnidadPeso(p.medida))
+
+    if (tieneProductosPeso) {
+      // Suma de oz por producto
+      let totalOz = 0
+      const detalle = {}
+      prods.forEach(p => {
+        const cant = Number(cantidadesLibres[p.id] || 0)
+        if (cant <= 0) return
+        const ozMatch = p.medida?.match(/[\d.]+/)
+        const ozUnidad = ozMatch ? parseFloat(ozMatch[0]) : 0
+        totalOz += cant * ozUnidad
+        detalle[`${p.nombre} (${p.medida})`] = cant
+      })
+      if (totalOz === 0) { setResultadoLibre({ vacio: true }); return }
+
+      const secciones = normalizarSecciones(recetaLibre)
+      const masaBaseOz = secciones[0]?.ingredientes?.reduce((acc, i) => acc + Number(i.oz || 0), 0) || 0
+      const factor = masaBaseOz > 0 ? totalOz / masaBaseOz : 0
+
+      setResultadoLibre({
+        vacio: false, receta: recetaLibre,
+        totalFactor: totalOz.toFixed(2), factor: factor.toFixed(4), usaPeso: true,
+        seccionesCalculadas: secciones.map(sec => ({ nombre: sec.nombre, ingredientes: sec.ingredientes.map(i => { const ozTotal = Number(i.oz) * factor; return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: (ozTotal / 16).toFixed(3) } }) })),
+        detalle
+      })
+    } else {
+      // Por unidades (latas, etc.)
+      let totalUnidades = 0
+      const detalle = {}
+      prods.forEach(p => {
+        const cant = Number(cantidadesLibres[p.id] || 0)
+        if (cant <= 0) return
+        totalUnidades += cant
+        detalle[`${p.nombre} (${p.medida})`] = cant
+      })
+      if (totalUnidades === 0) { setResultadoLibre({ vacio: true }); return }
+
+      const secciones = normalizarSecciones(recetaLibre)
+      const factor = totalUnidades
+
+      setResultadoLibre({
+        vacio: false, receta: recetaLibre,
+        totalFactor: totalUnidades.toString(), factor: factor.toFixed(4), usaPeso: false,
+        seccionesCalculadas: secciones.map(sec => ({ nombre: sec.nombre, ingredientes: sec.ingredientes.map(i => { const ozTotal = Number(i.oz) * factor; return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: (ozTotal / 16).toFixed(3) } }) })),
+        detalle
+      })
+    }
+  }
+
+  const confirmarProduccionLibre = async () => {
+    if (!resultadoLibre || resultadoLibre.vacio) return
+    setConfirmandoLibre(true)
+    setMsgConfirmLibre('')
+    try {
+      const actualizados = []
+      const noEncontrados = []
+      const todosLosIngredientes = resultadoLibre.seccionesCalculadas.flatMap(sec => sec.ingredientes)
+      for (const ing of todosLosIngredientes) {
+        const materia = inventario.find(m => m.nombre.toLowerCase().trim() === ing.nombre.toLowerCase().trim())
+        if (!materia) { noEncontrados.push(ing.nombre); continue }
+        const ozUsadas = parseFloat(ing.oz)
+        let descuento = materia.unidad === 'oz' ? ozUsadas : materia.unidad === 'lb' ? ozUsadas / 16 : null
+        if (descuento === null) { noEncontrados.push(ing.nombre); continue }
+        const nuevoStock = Math.max(0, (materia.stockActual || 0) - descuento)
+        await updateDoc(doc(db, 'inventario', materia.id), { stockActual: parseFloat(nuevoStock.toFixed(3)) })
+        actualizados.push(ing.nombre)
+      }
+      let msgFinal = `✅ Producción confirmada. ${actualizados.length} ingrediente${actualizados.length !== 1 ? 's' : ''} descontado${actualizados.length !== 1 ? 's' : ''} del inventario.`
+      if (noEncontrados.length > 0) msgFinal += ` Sin match en inventario: ${noEncontrados.join(', ')}.`
+      setMsgConfirmLibre(msgFinal)
+    } catch (e) {
+      setMsgConfirmLibre('⚠️ Error al confirmar producción.')
+    }
+    setConfirmandoLibre(false)
+  }
+
+  // ── CONFIRMAR PRODUCCIÓN (modo pedidos) ───────────────────────
 
   const confirmarProduccion = async () => {
     if (!resultado || resultado.vacio) return
@@ -225,14 +337,8 @@ export default function Recetas({ isAdmin }) {
         const materia = inventario.find(m => m.nombre.toLowerCase().trim() === ing.nombre.toLowerCase().trim())
         if (!materia) { noEncontrados.push(ing.nombre); continue }
         const ozUsadas = parseFloat(ing.oz)
-        let descuento = 0
-        if (materia.unidad === 'oz') {
-          descuento = ozUsadas
-        } else if (materia.unidad === 'lb') {
-          descuento = ozUsadas / 16
-        } else {
-          noEncontrados.push(ing.nombre); continue
-        }
+        let descuento = materia.unidad === 'oz' ? ozUsadas : materia.unidad === 'lb' ? ozUsadas / 16 : null
+        if (descuento === null) { noEncontrados.push(ing.nombre); continue }
         const nuevoStock = Math.max(0, (materia.stockActual || 0) - descuento)
         await updateDoc(doc(db, 'inventario', materia.id), { stockActual: parseFloat(nuevoStock.toFixed(3)) })
         actualizados.push(ing.nombre)
@@ -242,10 +348,11 @@ export default function Recetas({ isAdmin }) {
       setMsgConfirm(msgFinal)
     } catch (e) {
       setMsgConfirm('⚠️ Error al confirmar producción.')
-      console.error(e)
     }
     setConfirmando(false)
   }
+
+  // ── FORM RECETAS ──────────────────────────────────────────────
 
   const guardarReceta = async () => {
     if (!formNombre.trim() || !formGrupoId) { setMsg('⚠️ Completá nombre y grupo'); return }
@@ -255,18 +362,15 @@ export default function Recetas({ isAdmin }) {
 
     if (formEsBaseCompartida) {
       const ingValidos = formIngredientes.filter(i => i.nombre.trim() && i.oz)
-      if (ingValidos.length === 0) { setMsg('⚠️ Agregá al menos un ingrediente de la masa'); return }
+      if (ingValidos.length === 0) { setMsg('⚠️ Agregá al menos un ingrediente'); return }
       datos.ingredientes = ingValidos.map(i => ({ nombre: i.nombre.trim(), oz: parseFloat(i.oz) }))
       datos.secciones = []
     } else if (formUsaSecciones) {
       const seccionesValidas = formSecciones
         .map(sec => ({ nombre: sec.nombre.trim(), ingredientes: sec.ingredientes.filter(i => i.nombre.trim() && i.oz) }))
         .filter(sec => sec.nombre && sec.ingredientes.length > 0)
-      if (seccionesValidas.length === 0) { setMsg('⚠️ Agregá al menos una sección con ingredientes'); return }
-      datos.secciones = seccionesValidas.map(sec => ({
-        nombre: sec.nombre,
-        ingredientes: sec.ingredientes.map(i => ({ nombre: i.nombre.trim(), oz: parseFloat(i.oz) }))
-      }))
+      if (seccionesValidas.length === 0) { setMsg('⚠️ Agregá al menos una sección'); return }
+      datos.secciones = seccionesValidas.map(sec => ({ nombre: sec.nombre, ingredientes: sec.ingredientes.map(i => ({ nombre: i.nombre.trim(), oz: parseFloat(i.oz) })) }))
       datos.ingredientes = []
     } else {
       const ingValidos = formIngredientes.filter(i => i.nombre.trim() && i.oz)
@@ -292,78 +396,38 @@ export default function Recetas({ isAdmin }) {
     setFormNombre(''); setFormGrupoId(''); setFormSubgrupo('')
     setFormIngredientes([{ nombre: '', oz: '' }])
     setFormSecciones([seccionVacia('Masa'), seccionVacia('Relleno')])
-    setFormUsaSecciones(false)
-    setFormEsBaseCompartida(false)
+    setFormUsaSecciones(false); setFormEsBaseCompartida(false)
     setEditandoId(null); setMostrarForm(false); setMostrarSugIng({})
   }
 
   const iniciarEdicion = (r) => {
-    setFormNombre(r.nombre)
-    setFormGrupoId(r.grupoId)
-    setFormSubgrupo(r.subgrupo || '')
+    setFormNombre(r.nombre); setFormGrupoId(r.grupoId); setFormSubgrupo(r.subgrupo || '')
     setFormEsBaseCompartida(!!r.esBaseCompartida)
     const tieneSecciones = r.secciones && r.secciones.length > 0
     setFormUsaSecciones(tieneSecciones)
     if (tieneSecciones) {
-      setFormSecciones(r.secciones.map(sec => ({
-        nombre: sec.nombre,
-        ingredientes: sec.ingredientes.map(i => ({ nombre: i.nombre, oz: i.oz.toString() }))
-      })))
+      setFormSecciones(r.secciones.map(sec => ({ nombre: sec.nombre, ingredientes: sec.ingredientes.map(i => ({ nombre: i.nombre, oz: i.oz.toString() })) })))
     } else {
       setFormIngredientes((r.ingredientes || []).map(i => ({ nombre: i.nombre, oz: i.oz.toString() })))
     }
-    setEditandoId(r.id)
-    setMostrarForm(true)
+    setEditandoId(r.id); setMostrarForm(true)
   }
 
-  const eliminar = async (id) => {
-    await deleteDoc(doc(db, 'recetas', id))
-    setConfirmEliminar(null)
-  }
+  const eliminar = async (id) => { await deleteDoc(doc(db, 'recetas', id)); setConfirmEliminar(null) }
 
   const agregarIngrediente = () => setFormIngredientes([...formIngredientes, { nombre: '', oz: '' }])
   const quitarIngrediente = (idx) => setFormIngredientes(formIngredientes.filter((_, i) => i !== idx))
-  const actualizarIngrediente = (idx, campo, valor) => {
-    const nuevos = [...formIngredientes]
-    nuevos[idx][campo] = valor
-    setFormIngredientes(nuevos)
-  }
+  const actualizarIngrediente = (idx, campo, valor) => { const n = [...formIngredientes]; n[idx][campo] = valor; setFormIngredientes(n) }
 
   const agregarSeccion = () => setFormSecciones([...formSecciones, seccionVacia()])
   const quitarSeccion = (si) => setFormSecciones(formSecciones.filter((_, i) => i !== si))
-  const actualizarNombreSeccion = (si, valor) => {
-    const nuevas = [...formSecciones]
-    nuevas[si] = { ...nuevas[si], nombre: valor }
-    setFormSecciones(nuevas)
-  }
-  const agregarIngSeccion = (si) => {
-    const nuevas = [...formSecciones]
-    nuevas[si] = { ...nuevas[si], ingredientes: [...nuevas[si].ingredientes, { nombre: '', oz: '' }] }
-    setFormSecciones(nuevas)
-  }
-  const quitarIngSeccion = (si, ii) => {
-    const nuevas = [...formSecciones]
-    nuevas[si] = { ...nuevas[si], ingredientes: nuevas[si].ingredientes.filter((_, i) => i !== ii) }
-    setFormSecciones(nuevas)
-  }
-  const actualizarIngSeccion = (si, ii, campo, valor) => {
-    const nuevas = [...formSecciones]
-    const ings = [...nuevas[si].ingredientes]
-    ings[ii] = { ...ings[ii], [campo]: valor }
-    nuevas[si] = { ...nuevas[si], ingredientes: ings }
-    setFormSecciones(nuevas)
-  }
+  const actualizarNombreSeccion = (si, valor) => { const n = [...formSecciones]; n[si] = { ...n[si], nombre: valor }; setFormSecciones(n) }
+  const agregarIngSeccion = (si) => { const n = [...formSecciones]; n[si] = { ...n[si], ingredientes: [...n[si].ingredientes, { nombre: '', oz: '' }] }; setFormSecciones(n) }
+  const quitarIngSeccion = (si, ii) => { const n = [...formSecciones]; n[si] = { ...n[si], ingredientes: n[si].ingredientes.filter((_, i) => i !== ii) }; setFormSecciones(n) }
+  const actualizarIngSeccion = (si, ii, campo, valor) => { const n = [...formSecciones]; const ings = [...n[si].ingredientes]; ings[ii] = { ...ings[ii], [campo]: valor }; n[si] = { ...n[si], ingredientes: ings }; setFormSecciones(n) }
 
-  const sugerenciasSimple = (idx) => {
-    const texto = formIngredientes[idx]?.nombre || ''
-    if (!texto.trim()) return []
-    return inventario.map(m => m.nombre).filter(n => n.toLowerCase().includes(texto.toLowerCase())).sort()
-  }
-  const sugerenciasSeccion = (si, ii) => {
-    const texto = formSecciones[si]?.ingredientes[ii]?.nombre || ''
-    if (!texto.trim()) return []
-    return inventario.map(m => m.nombre).filter(n => n.toLowerCase().includes(texto.toLowerCase())).sort()
-  }
+  const sugerenciasSimple = (idx) => { const t = formIngredientes[idx]?.nombre || ''; if (!t.trim()) return []; return inventario.map(m => m.nombre).filter(n => n.toLowerCase().includes(t.toLowerCase())).sort() }
+  const sugerenciasSeccion = (si, ii) => { const t = formSecciones[si]?.ingredientes[ii]?.nombre || ''; if (!t.trim()) return []; return inventario.map(m => m.nombre).filter(n => n.toLowerCase().includes(t.toLowerCase())).sort() }
 
   const inputStyle = { width:'100%', padding:'10px', borderRadius:'8px', border:`1px solid ${G.borde}`, boxSizing:'border-box', background:'white', color: G.texto, fontSize:'14px' }
 
@@ -372,14 +436,72 @@ export default function Recetas({ isAdmin }) {
     ...(isAdmin ? [{ key:'gestionar', label:'⚙️ Gestionar' }] : [])
   ]
 
+  const renderResultado = (res, onConfirmar, confirmando_, msgConfirm_) => (
+    <>
+      <div style={{ background: G.cafe, color:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px' }}>
+        <p style={{ margin:0, fontWeight:'bold', fontSize:'16px' }}>{res.receta.nombre}</p>
+        <p style={{ margin:'4px 0 0', fontSize:'13px', opacity:0.85 }}>
+          {res.usaPeso ? `Total masa: ${res.totalFactor} oz` : `Total: ${res.totalFactor} unidades`} · Factor: ×{res.factor}
+        </p>
+      </div>
+
+      {res.detalle && Object.keys(res.detalle).length > 0 && (
+        <div style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+          <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>Detalle de producción</p>
+          {Object.entries(res.detalle).map(([nombre, cant]) => (
+            <div key={nombre} style={{ display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:`1px solid ${G.borde}`, fontSize:'13px' }}>
+              <span style={{ color: G.texto }}>{nombre}</span>
+              <span style={{ fontWeight:'bold', color: G.cafe }}>{cant} uds</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {res.seccionesCalculadas.map((sec, si) => (
+        <div key={si} style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', borderTop: res.seccionesCalculadas.length > 1 ? `3px solid ${si === 0 ? G.cafe : G.verde}` : 'none' }}>
+          {res.seccionesCalculadas.length > 1 && (
+            <p style={{ fontSize:'13px', fontWeight:'bold', color: si === 0 ? G.cafe : G.verde, marginBottom:'10px', textTransform:'uppercase', letterSpacing:'0.5px' }}>
+              {si === 0 ? '🍞' : '🥜'} {sec.nombre}
+            </p>
+          )}
+          {res.seccionesCalculadas.length === 1 && (
+            <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>Ingredientes</p>
+          )}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr auto auto', gap:'0 12px', alignItems:'center' }}>
+            <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px' }}>Ingrediente</span>
+            <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px', textAlign:'right' }}>Oz</span>
+            <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px', textAlign:'right' }}>Lb</span>
+            {sec.ingredientes.map((ing, idx) => (
+              <>
+                <span key={`n${idx}`} style={{ fontSize:'14px', color: G.texto, padding:'6px 0', borderTop:`1px solid ${G.borde}` }}>{ing.nombre}</span>
+                <span key={`o${idx}`} style={{ fontSize:'14px', fontWeight:'bold', color: G.cafe, padding:'6px 0', borderTop:`1px solid ${G.borde}`, textAlign:'right' }}>{ing.oz}</span>
+                <span key={`l${idx}`} style={{ fontSize:'14px', fontWeight:'bold', color: G.texto, padding:'6px 0', borderTop:`1px solid ${G.borde}`, textAlign:'right' }}>{ing.lb}</span>
+              </>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {msgConfirm_ ? (
+        <div style={{ background: msgConfirm_.includes('⚠️') ? '#fee2e2' : '#dcfce7', padding:'14px 16px', borderRadius:'10px', fontSize:'13px', color: msgConfirm_.includes('⚠️') ? G.rojo : G.verde }}>
+          {msgConfirm_}
+        </div>
+      ) : (
+        <button onClick={onConfirmar} disabled={confirmando_}
+          style={{ width:'100%', padding:'14px', background: G.verde, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px' }}>
+          {confirmando_ ? 'Confirmando...' : '✅ Confirmar producción'}
+        </button>
+      )}
+    </>
+  )
+
   const renderIngredienteRow = (ing, idx, onChange, onQuitar, sugs, mostrar, onFocus, onBlur, onSelectSug) => (
     <div key={idx} style={{ marginBottom:'8px' }}>
       <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
         <div style={{ position:'relative', flex:2 }}>
           <input placeholder="Ingrediente" value={ing.nombre}
             onChange={e => onChange(idx, 'nombre', e.target.value)}
-            onFocus={() => onFocus(idx)}
-            onBlur={() => setTimeout(() => onBlur(idx), 150)}
+            onFocus={() => onFocus(idx)} onBlur={() => setTimeout(() => onBlur(idx), 150)}
             autoCorrect="off" autoCapitalize="off" spellCheck="false"
             style={{ ...inputStyle, marginBottom:0 }} />
           {mostrar && sugs.length > 0 && (
@@ -388,9 +510,7 @@ export default function Recetas({ isAdmin }) {
                 <div key={s} onClick={() => onSelectSug(idx, s)}
                   style={{ padding:'9px 14px', cursor:'pointer', borderBottom:`1px solid ${G.borde}`, fontSize:'14px', color: G.texto }}
                   onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
-                  onMouseLeave={e => e.currentTarget.style.background = 'white'}>
-                  {s}
-                </div>
+                  onMouseLeave={e => e.currentTarget.style.background = 'white'}>{s}</div>
               ))}
             </div>
           )}
@@ -406,14 +526,12 @@ export default function Recetas({ isAdmin }) {
 
   return (
     <div style={{ maxWidth:'520px', margin:'0 auto' }}>
-
       <div style={{ background:'white', position:'sticky', top:'52px', zIndex:90, borderBottom:`1px solid ${G.borde}` }}>
         <div style={{ display:'flex' }}>
           {subTabs.map(t => (
             <button key={t.key} onClick={() => { setTab(t.key); setResultado(null); setMsgConfirm(''); setTurnoConfirmado(false) }}
               style={{ flex:1, padding:'13px 16px', border:'none', background:'transparent',
-                color: tab === t.key ? G.cafe : G.gris,
-                fontWeight: tab === t.key ? 'bold' : 'normal',
+                color: tab === t.key ? G.cafe : G.gris, fontWeight: tab === t.key ? 'bold' : 'normal',
                 borderBottom: tab === t.key ? `3px solid ${G.cafe}` : '3px solid transparent',
                 cursor:'pointer', fontSize:'14px' }}>
               {t.label}
@@ -428,70 +546,70 @@ export default function Recetas({ isAdmin }) {
           <>
             <h3 style={{ color: G.cafe, marginBottom:'16px' }}>🧮 Calcular receta</h3>
 
-            {/* Selector de turno */}
-            <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Turno a producir</p>
-            <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
-              {[{ val:'manana', label:'🌅 Mañana' }, { val:'tarde', label:'🌇 Tarde' }].map(op => (
-                <button key={op.val} onClick={() => cambiarTurno(op.val)}
-                  style={{ flex:1, padding:'10px 8px', borderRadius:'8px',
-                    border:`2px solid ${turnoFiltro === op.val ? G.cafe : G.borde}`,
-                    background: turnoFiltro === op.val ? G.cafe : 'white',
-                    color: turnoFiltro === op.val ? 'white' : G.texto,
-                    cursor:'pointer', fontSize:'13px', fontWeight: turnoFiltro === op.val ? 'bold' : 'normal' }}>
+            {/* Sub-tabs modo */}
+            <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
+              {[{ val:'pedidos', label:'📦 Por pedidos del día' }, { val:'libre', label:'🔢 Cantidad libre' }].map(op => (
+                <button key={op.val} onClick={() => { setModoCalculo(op.val); setResultado(null); setResultadoLibre(null); setRecetaLibre(null); setCantidadesLibres({}) }}
+                  style={{ flex:1, padding:'10px 8px', borderRadius:'8px', fontSize:'12px', fontWeight: modoCalculo === op.val ? 'bold' : 'normal',
+                    border:`2px solid ${modoCalculo === op.val ? G.cafe : G.borde}`,
+                    background: modoCalculo === op.val ? G.cafe : 'white',
+                    color: modoCalculo === op.val ? 'white' : G.texto, cursor:'pointer' }}>
                   {op.label}
                 </button>
               ))}
             </div>
 
-            {/* Cuadro de confirmación de turno */}
-            {!turnoConfirmado && (
-              <div style={{ background: turnoFiltro === 'manana' ? '#eff6ff' : '#fdf3e7', border:`2px solid ${turnoFiltro === 'manana' ? '#3b82f6' : G.cafe}`, borderRadius:'12px', padding:'16px', marginBottom:'20px' }}>
-                <p style={{ margin:'0 0 4px', fontWeight:'bold', fontSize:'15px', color: turnoFiltro === 'manana' ? '#1d4ed8' : G.cafe }}>
-                  {turnoFiltro === 'manana' ? '🌅 Producción para turno Mañana' : '🌇 Producción para turno Tarde'}
-                </p>
-                <p style={{ margin:'0 0 14px', fontSize:'13px', color: G.gris }}>
-                  {HORARIOS_TURNO[turnoFiltro]}
-                </p>
-                <div style={{ display:'flex', gap:'8px' }}>
-                  <button onClick={() => cambiarTurno(turnoFiltro === 'manana' ? 'tarde' : 'manana')}
-                    style={{ flex:1, padding:'10px', background:'white', color: G.gris, border:`1px solid ${G.borde}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px' }}>
-                    Cambiar turno
-                  </button>
-                  <button onClick={confirmarTurno}
-                    style={{ flex:2, padding:'10px', background: turnoFiltro === 'manana' ? '#1d4ed8' : G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold', fontSize:'14px' }}>
-                    ✅ Confirmar — voy a producir para {turnoFiltro === 'manana' ? 'Mañana' : 'Tarde'}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Confirmado — mostrar badge del turno activo */}
-            {turnoConfirmado && (
-              <div style={{ display:'flex', alignItems:'center', gap:'10px', background: turnoFiltro === 'manana' ? '#eff6ff' : '#fdf3e7', border:`1px solid ${turnoFiltro === 'manana' ? '#93c5fd' : '#f0d9b5'}`, borderRadius:'10px', padding:'10px 14px', marginBottom:'20px' }}>
-                <span style={{ fontSize:'18px' }}>{turnoFiltro === 'manana' ? '🌅' : '🌇'}</span>
-                <div style={{ flex:1 }}>
-                  <p style={{ margin:0, fontWeight:'bold', fontSize:'13px', color: turnoFiltro === 'manana' ? '#1d4ed8' : G.cafe }}>
-                    Produciendo para turno {turnoFiltro === 'manana' ? 'Mañana' : 'Tarde'}
-                  </p>
-                  <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{HORARIOS_TURNO[turnoFiltro]}</p>
-                </div>
-                <button onClick={() => { setTurnoConfirmado(false); setResultado(null); setRecetaSeleccionada(null) }}
-                  style={{ padding:'6px 10px', background:'white', color: G.gris, border:`1px solid ${G.borde}`, borderRadius:'6px', cursor:'pointer', fontSize:'12px' }}>
-                  Cambiar
-                </button>
-              </div>
-            )}
-
-            {/* Selector de receta — solo si turno confirmado */}
-            {turnoConfirmado && (
+            {/* ── MODO PEDIDOS ── */}
+            {modoCalculo === 'pedidos' && (
               <>
-                {recetas.length === 0 && (
-                  <p style={{ textAlign:'center', color: G.gris, marginTop:'40px', fontSize:'14px' }}>
-                    No hay recetas creadas aún.{isAdmin ? ' Andá a ⚙️ Gestionar para crear una.' : ''}
-                  </p>
+                <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Turno a producir</p>
+                <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
+                  {[{ val:'manana', label:'🌅 Mañana' }, { val:'tarde', label:'🌇 Tarde' }].map(op => (
+                    <button key={op.val} onClick={() => cambiarTurno(op.val)}
+                      style={{ flex:1, padding:'10px 8px', borderRadius:'8px',
+                        border:`2px solid ${turnoFiltro === op.val ? G.cafe : G.borde}`,
+                        background: turnoFiltro === op.val ? G.cafe : 'white',
+                        color: turnoFiltro === op.val ? 'white' : G.texto,
+                        cursor:'pointer', fontSize:'13px', fontWeight: turnoFiltro === op.val ? 'bold' : 'normal' }}>
+                      {op.label}
+                    </button>
+                  ))}
+                </div>
+
+                {!turnoConfirmado && (
+                  <div style={{ background: turnoFiltro === 'manana' ? '#eff6ff' : '#fdf3e7', border:`2px solid ${turnoFiltro === 'manana' ? '#3b82f6' : G.cafe}`, borderRadius:'12px', padding:'16px', marginBottom:'20px' }}>
+                    <p style={{ margin:'0 0 4px', fontWeight:'bold', fontSize:'15px', color: turnoFiltro === 'manana' ? '#1d4ed8' : G.cafe }}>
+                      {turnoFiltro === 'manana' ? '🌅 Producción para turno Mañana' : '🌇 Producción para turno Tarde'}
+                    </p>
+                    <p style={{ margin:'0 0 14px', fontSize:'13px', color: G.gris }}>{HORARIOS_TURNO[turnoFiltro]}</p>
+                    <div style={{ display:'flex', gap:'8px' }}>
+                      <button onClick={() => cambiarTurno(turnoFiltro === 'manana' ? 'tarde' : 'manana')}
+                        style={{ flex:1, padding:'10px', background:'white', color: G.gris, border:`1px solid ${G.borde}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px' }}>
+                        Cambiar turno
+                      </button>
+                      <button onClick={() => setTurnoConfirmado(true)}
+                        style={{ flex:2, padding:'10px', background: turnoFiltro === 'manana' ? '#1d4ed8' : G.cafe, color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold', fontSize:'14px' }}>
+                        ✅ Confirmar — voy a producir para {turnoFiltro === 'manana' ? 'Mañana' : 'Tarde'}
+                      </button>
+                    </div>
+                  </div>
                 )}
 
-                {recetas.length > 0 && (
+                {turnoConfirmado && (
+                  <div style={{ display:'flex', alignItems:'center', gap:'10px', background: turnoFiltro === 'manana' ? '#eff6ff' : '#fdf3e7', border:`1px solid ${turnoFiltro === 'manana' ? '#93c5fd' : '#f0d9b5'}`, borderRadius:'10px', padding:'10px 14px', marginBottom:'20px' }}>
+                    <span style={{ fontSize:'18px' }}>{turnoFiltro === 'manana' ? '🌅' : '🌇'}</span>
+                    <div style={{ flex:1 }}>
+                      <p style={{ margin:0, fontWeight:'bold', fontSize:'13px', color: turnoFiltro === 'manana' ? '#1d4ed8' : G.cafe }}>Produciendo para turno {turnoFiltro === 'manana' ? 'Mañana' : 'Tarde'}</p>
+                      <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{HORARIOS_TURNO[turnoFiltro]}</p>
+                    </div>
+                    <button onClick={() => { setTurnoConfirmado(false); setResultado(null); setRecetaSeleccionada(null) }}
+                      style={{ padding:'6px 10px', background:'white', color: G.gris, border:`1px solid ${G.borde}`, borderRadius:'6px', cursor:'pointer', fontSize:'12px' }}>
+                      Cambiar
+                    </button>
+                  </div>
+                )}
+
+                {turnoConfirmado && (
                   <>
                     <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Seleccionar receta</p>
                     <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'20px' }}>
@@ -506,74 +624,88 @@ export default function Recetas({ isAdmin }) {
                         </button>
                       ))}
                     </div>
+
+                    {resultado?.vacio && (
+                      <div style={{ background:'white', padding:'16px', borderRadius:'10px', textAlign:'center', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+                        <p style={{ color: G.gris, fontSize:'14px' }}>
+                          No hay pedidos de turno <strong>{turnoFiltro === 'manana' ? 'Mañana' : 'Tarde'}</strong> para <strong>{resultado.receta.nombre}</strong>.
+                        </p>
+                      </div>
+                    )}
+
+                    {resultado && !resultado.vacio && renderResultado(resultado, confirmarProduccion, confirmando, msgConfirm)}
                   </>
                 )}
+              </>
+            )}
 
-                {resultado?.vacio && (
-                  <div style={{ background:'white', padding:'16px', borderRadius:'10px', textAlign:'center', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-                    <p style={{ color: G.gris, fontSize:'14px' }}>
-                      No hay pedidos de turno <strong>{turnoFiltro === 'manana' ? 'Mañana' : 'Tarde'}</strong> para {resultado.receta.esBaseCompartida ? 'los productos que vinculan' : 'el subgrupo de'} <strong>{resultado.receta.nombre}</strong>.
-                    </p>
-                  </div>
-                )}
+            {/* ── MODO LIBRE ── */}
+            {modoCalculo === 'libre' && (
+              <>
+                <div style={{ background: G.cafeClaro, border:`1px solid #f0d9b5`, borderRadius:'10px', padding:'12px 14px', marginBottom:'20px' }}>
+                  <p style={{ margin:0, fontSize:'13px', color: G.cafe }}>
+                    🔢 <strong>Modo cantidad libre</strong> — calculá ingredientes para cualquier cantidad, independiente de los pedidos del día.
+                  </p>
+                </div>
 
-                {resultado && !resultado.vacio && (
+                <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Seleccionar receta</p>
+                <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'20px' }}>
+                  {recetas.map(r => (
+                    <button key={r.id} onClick={() => seleccionarRecetaLibre(r)}
+                      style={{ padding:'10px 16px', borderRadius:'8px',
+                        border:`2px solid ${recetaLibre?.id === r.id ? G.cafe : G.borde}`,
+                        background: recetaLibre?.id === r.id ? G.cafe : 'white',
+                        color: recetaLibre?.id === r.id ? 'white' : G.texto,
+                        cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>
+                      {r.nombre}
+                    </button>
+                  ))}
+                </div>
+
+                {recetaLibre && (
                   <>
-                    <div style={{ background: G.cafe, color:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px' }}>
-                      <p style={{ margin:0, fontWeight:'bold', fontSize:'16px' }}>{resultado.receta.nombre}</p>
-                      <p style={{ margin:'4px 0 0', fontSize:'13px', opacity:0.85 }}>
-                        Turno: {resultado.turnoFiltro === 'manana' ? '🌅 Mañana' : '🌇 Tarde'}{resultado.esBaseCompartida ? ' · Receta compartida' : ` · Subgrupo: ${resultado.receta.subgrupo}`}
-                      </p>
-                      <p style={{ margin:'2px 0 0', fontSize:'13px', opacity:0.85 }}>
-                        {resultado.usaPeso ? `Masa necesaria: ${resultado.totalFactor} oz` : `Total: ${resultado.totalFactor} unidades`} · Factor: ×{resultado.factor}
-                      </p>
-                    </div>
-
-                    <div style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-                      <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>Pedidos incluidos</p>
-                      {Object.entries(resultado.detalle).map(([nombre, cant]) => (
-                        <div key={nombre} style={{ display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:`1px solid ${G.borde}`, fontSize:'13px' }}>
-                          <span style={{ color: G.texto }}>{nombre}</span>
-                          <span style={{ fontWeight:'bold', color: G.cafe }}>{cant} uds</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    {resultado.seccionesCalculadas.map((sec, si) => (
-                      <div key={si} style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', borderTop: resultado.seccionesCalculadas.length > 1 ? `3px solid ${si === 0 ? G.cafe : G.verde}` : 'none' }}>
-                        {resultado.seccionesCalculadas.length > 1 && (
-                          <p style={{ fontSize:'13px', fontWeight:'bold', color: si === 0 ? G.cafe : G.verde, marginBottom:'10px', textTransform:'uppercase', letterSpacing:'0.5px' }}>
-                            {si === 0 ? '🍞' : '🥜'} {sec.nombre}
+                    {(() => {
+                      const prods = productosDeReceta(recetaLibre)
+                      const tieneProductosPeso = prods.some(p => esUnidadPeso(p.medida))
+                      return (
+                        <div style={{ background:'white', padding:'16px', borderRadius:'10px', marginBottom:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', borderTop:`3px solid ${G.cafe}` }}>
+                          <p style={{ fontWeight:'bold', color: G.cafe, marginBottom:'4px', fontSize:'15px' }}>{recetaLibre.nombre}</p>
+                          <p style={{ fontSize:'12px', color: G.gris, marginBottom:'16px' }}>
+                            {tieneProductosPeso ? 'Ingresá la cantidad de cada presentación' : 'Ingresá la cantidad de unidades a producir'}
                           </p>
-                        )}
-                        {resultado.seccionesCalculadas.length === 1 && (
-                          <p style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px' }}>Ingredientes</p>
-                        )}
-                        <div style={{ display:'grid', gridTemplateColumns:'1fr auto auto', gap:'0 12px', alignItems:'center' }}>
-                          <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px' }}>Ingrediente</span>
-                          <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px', textAlign:'right' }}>Oz</span>
-                          <span style={{ fontSize:'11px', fontWeight:'bold', color: G.gris, paddingBottom:'6px', textAlign:'right' }}>Lb</span>
-                          {sec.ingredientes.map((ing, idx) => (
-                            <>
-                              <span key={`n${idx}`} style={{ fontSize:'14px', color: G.texto, padding:'6px 0', borderTop:`1px solid ${G.borde}` }}>{ing.nombre}</span>
-                              <span key={`o${idx}`} style={{ fontSize:'14px', fontWeight:'bold', color: G.cafe, padding:'6px 0', borderTop:`1px solid ${G.borde}`, textAlign:'right' }}>{ing.oz}</span>
-                              <span key={`l${idx}`} style={{ fontSize:'14px', fontWeight:'bold', color: G.texto, padding:'6px 0', borderTop:`1px solid ${G.borde}`, textAlign:'right' }}>{ing.lb}</span>
-                            </>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
 
-                    {msgConfirm ? (
-                      <div style={{ background: msgConfirm.includes('⚠️') ? '#fee2e2' : '#dcfce7', padding:'14px 16px', borderRadius:'10px', fontSize:'13px', color: msgConfirm.includes('⚠️') ? G.rojo : G.verde }}>
-                        {msgConfirm}
+                          {prods.length === 0 && (
+                            <p style={{ color: G.gris, fontSize:'13px', textAlign:'center' }}>No hay productos vinculados a esta receta.</p>
+                          )}
+
+                          {prods.map(p => (
+                            <div key={p.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px' }}>
+                              <div>
+                                <p style={{ margin:0, fontWeight:'bold', fontSize:'14px', color: G.texto }}>{p.nombre}</p>
+                                <p style={{ margin:0, fontSize:'12px', color: G.gris }}>{p.medida}</p>
+                              </div>
+                              <input type="number" placeholder="0" min="0"
+                                value={cantidadesLibres[p.id] || ''}
+                                onChange={e => setCantidadesLibres(prev => ({ ...prev, [p.id]: e.target.value }))}
+                                style={{ width:'80px', padding:'10px', borderRadius:'8px', border:`1px solid ${G.borde}`, textAlign:'center', fontSize:'16px', fontWeight:'bold', color: G.cafe }} />
+                            </div>
+                          ))}
+
+                          <button onClick={calcularLibre}
+                            style={{ width:'100%', padding:'13px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px', marginTop:'8px' }}>
+                            🧮 Calcular ingredientes
+                          </button>
+                        </div>
+                      )
+                    })()}
+
+                    {resultadoLibre?.vacio && (
+                      <div style={{ background:'white', padding:'16px', borderRadius:'10px', textAlign:'center', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+                        <p style={{ color: G.gris, fontSize:'14px' }}>Ingresá al menos una cantidad mayor a 0.</p>
                       </div>
-                    ) : (
-                      <button onClick={confirmarProduccion} disabled={confirmando}
-                        style={{ width:'100%', padding:'14px', background: G.verde, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px' }}>
-                        {confirmando ? 'Confirmando...' : '✅ Confirmar producción'}
-                      </button>
                     )}
+
+                    {resultadoLibre && !resultadoLibre.vacio && renderResultado(resultadoLibre, confirmarProduccionLibre, confirmandoLibre, msgConfirmLibre)}
                   </>
                 )}
               </>
@@ -623,15 +755,14 @@ export default function Recetas({ isAdmin }) {
 
                 {formEsBaseCompartida && (
                   <div style={{ background:'#fdf3e7', border:'1px solid #f0d9b5', borderRadius:'10px', padding:'12px 14px', marginBottom:'16px', fontSize:'13px', color: G.cafe }}>
-                    💡 Después de guardar, andá a <strong>Catálogo</strong> y vinculá cada producto que la use, indicando cuántas oz de esta receta le corresponden a 1 unidad.
+                    💡 Después de guardar, andá a <strong>Catálogo</strong> y vinculá cada producto que la use.
                   </div>
                 )}
 
                 {!formEsBaseCompartida && (
                   <>
                     <p style={{ fontSize:'12px', color: G.gris, marginBottom:'6px' }}>Subgrupo vinculado</p>
-                    <select value={formSubgrupo} onChange={e => setFormSubgrupo(e.target.value)}
-                      style={{ ...inputStyle, marginBottom:'16px' }}>
+                    <select value={formSubgrupo} onChange={e => setFormSubgrupo(e.target.value)} style={{ ...inputStyle, marginBottom:'16px' }}>
                       <option value=''>Seleccioná un subgrupo...</option>
                       {subgrupos.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
@@ -655,17 +786,12 @@ export default function Recetas({ isAdmin }) {
                     {formIngredientes.map((ing, idx) => {
                       const sugs = sugerenciasSimple(idx)
                       const mostrar = mostrarSugIng[`s-${idx}`] && sugs.length > 0
-                      return renderIngredienteRow(
-                        ing, idx,
-                        actualizarIngrediente, quitarIngrediente,
-                        sugs, mostrar,
+                      return renderIngredienteRow(ing, idx, actualizarIngrediente, quitarIngrediente, sugs, mostrar,
                         (i) => setMostrarSugIng(prev => ({ ...prev, [`s-${i}`]: true })),
                         (i) => setMostrarSugIng(prev => ({ ...prev, [`s-${i}`]: false })),
-                        (i, s) => { actualizarIngrediente(i, 'nombre', s); setMostrarSugIng(prev => ({ ...prev, [`s-${i}`]: false })) }
-                      )
+                        (i, s) => { actualizarIngrediente(i, 'nombre', s); setMostrarSugIng(prev => ({ ...prev, [`s-${i}`]: false })) })
                     })}
-                    <button onClick={agregarIngrediente}
-                      style={{ width:'100%', padding:'9px', background: G.cafeClaro, color: G.cafe, border:`1px dashed ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px', marginBottom:'16px' }}>
+                    <button onClick={agregarIngrediente} style={{ width:'100%', padding:'9px', background: G.cafeClaro, color: G.cafe, border:`1px dashed ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px', marginBottom:'16px' }}>
                       ➕ Agregar ingrediente
                     </button>
                   </>
@@ -676,7 +802,7 @@ export default function Recetas({ isAdmin }) {
                     {formSecciones.map((sec, si) => (
                       <div key={si} style={{ border:`1px solid ${G.borde}`, borderRadius:'10px', padding:'14px', marginBottom:'12px', background:'#fafaf9' }}>
                         <div style={{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'12px' }}>
-                          <input placeholder={`Nombre de sección (ej: Masa)`} value={sec.nombre}
+                          <input placeholder="Nombre de sección" value={sec.nombre}
                             onChange={e => actualizarNombreSeccion(si, e.target.value)}
                             style={{ ...inputStyle, marginBottom:0, fontWeight:'bold', fontSize:'15px' }} />
                           {formSecciones.length > 1 && (
@@ -705,9 +831,7 @@ export default function Recetas({ isAdmin }) {
                                         <div key={s} onClick={() => { actualizarIngSeccion(si, ii, 'nombre', s); setMostrarSugIng(prev => ({ ...prev, [key]: false })) }}
                                           style={{ padding:'9px 14px', cursor:'pointer', borderBottom:`1px solid ${G.borde}`, fontSize:'14px', color: G.texto }}
                                           onMouseEnter={e => e.currentTarget.style.background = G.cafeClaro}
-                                          onMouseLeave={e => e.currentTarget.style.background = 'white'}>
-                                          {s}
-                                        </div>
+                                          onMouseLeave={e => e.currentTarget.style.background = 'white'}>{s}</div>
                                       ))}
                                     </div>
                                   )}
@@ -723,14 +847,12 @@ export default function Recetas({ isAdmin }) {
                             </div>
                           )
                         })}
-                        <button onClick={() => agregarIngSeccion(si)}
-                          style={{ width:'100%', padding:'8px', background: G.cafeClaro, color: G.cafe, border:`1px dashed ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px' }}>
+                        <button onClick={() => agregarIngSeccion(si)} style={{ width:'100%', padding:'8px', background: G.cafeClaro, color: G.cafe, border:`1px dashed ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px' }}>
                           ➕ Ingrediente
                         </button>
                       </div>
                     ))}
-                    <button onClick={agregarSeccion}
-                      style={{ width:'100%', padding:'9px', background:'white', color: G.cafe, border:`1px dashed ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px', marginBottom:'16px' }}>
+                    <button onClick={agregarSeccion} style={{ width:'100%', padding:'9px', background:'white', color: G.cafe, border:`1px dashed ${G.cafe}`, borderRadius:'8px', cursor:'pointer', fontSize:'13px', marginBottom:'16px' }}>
                       ➕ Agregar sección
                     </button>
                   </>
@@ -752,9 +874,7 @@ export default function Recetas({ isAdmin }) {
 
             {recetas.map(r => {
               const tieneSecciones = r.secciones && r.secciones.length > 0
-              const totalIng = tieneSecciones
-                ? r.secciones.reduce((acc, s) => acc + (s.ingredientes?.length || 0), 0)
-                : (r.ingredientes?.length || 0)
+              const totalIng = tieneSecciones ? r.secciones.reduce((acc, s) => acc + (s.ingredientes?.length || 0), 0) : (r.ingredientes?.length || 0)
               return (
                 <div key={r.id} style={{ background:'white', padding:'14px 16px', borderRadius:'10px', marginBottom:'10px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
                   {confirmEliminar === r.id ? (
