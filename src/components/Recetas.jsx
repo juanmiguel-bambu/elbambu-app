@@ -20,7 +20,7 @@ const HORARIOS_TURNO = {
 
 export default function Recetas({ isAdmin }) {
   const [tab, setTab] = useState('calcular')
-  const [modoCalculo, setModoCalculo] = useState('pedidos') // 'pedidos' | 'libre'
+  const [modoCalculo, setModoCalculo] = useState('pedidos')
   const [recetas, setRecetas] = useState([])
   const [grupos, setGrupos] = useState([])
   const [subgrupos, setSubgrupos] = useState([])
@@ -33,9 +33,8 @@ export default function Recetas({ isAdmin }) {
   const [msgConfirm, setMsgConfirm] = useState('')
   const [turnoConfirmado, setTurnoConfirmado] = useState(false)
 
-  // Modo libre
   const [recetaLibre, setRecetaLibre] = useState(null)
-  const [cantidadesLibres, setCantidadesLibres] = useState({}) // productoId -> cantidad, o 'oz' -> cantidad
+  const [cantidadesLibres, setCantidadesLibres] = useState({})
   const [resultadoLibre, setResultadoLibre] = useState(null)
   const [msgConfirmLibre, setMsgConfirmLibre] = useState('')
   const [confirmandoLibre, setConfirmandoLibre] = useState(false)
@@ -148,10 +147,8 @@ export default function Recetas({ isAdmin }) {
 
       setResultado({
         vacio: false, receta,
-        totalFactor: totalOz.toFixed(2),
-        masaBaseOz: ozBaseReceta.toFixed(2),
-        factor: factor.toFixed(4),
-        usaPeso: true, turnoFiltro,
+        totalFactor: totalOz.toFixed(2), masaBaseOz: ozBaseReceta.toFixed(2),
+        factor: factor.toFixed(4), usaPeso: true, turnoFiltro,
         seccionesCalculadas: [{ nombre: receta.nombre, ingredientes: recetaIngredientes.map(i => { const ozTotal = Number(i.oz) * factor; return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: (ozTotal / 16).toFixed(3) } }) }],
         detalle, esBaseCompartida: true
       })
@@ -186,16 +183,12 @@ export default function Recetas({ isAdmin }) {
 
     setResultado({
       vacio: false, receta,
-      totalFactor: totalFactor.toFixed(2),
-      masaBaseOz: masaBaseOz.toFixed(2),
-      factor: factor.toFixed(4),
-      usaPeso, turnoFiltro,
+      totalFactor: totalFactor.toFixed(2), masaBaseOz: masaBaseOz.toFixed(2),
+      factor: factor.toFixed(4), usaPeso, turnoFiltro,
       seccionesCalculadas: secciones.map(sec => ({ nombre: sec.nombre, ingredientes: sec.ingredientes.map(i => { const ozTotal = Number(i.oz) * factor; return { nombre: i.nombre, oz: ozTotal.toFixed(2), lb: (ozTotal / 16).toFixed(3) } }) })),
       detalle
     })
   }
-
-  // ── MODO LIBRE ────────────────────────────────────────────────
 
   const seleccionarRecetaLibre = (receta) => {
     setRecetaLibre(receta)
@@ -215,7 +208,6 @@ export default function Recetas({ isAdmin }) {
   const calcularLibre = () => {
     if (!recetaLibre) return
     setMsgConfirmLibre('')
-
     const prods = productosDeReceta(recetaLibre)
 
     if (recetaLibre.esBaseCompartida) {
@@ -230,12 +222,9 @@ export default function Recetas({ isAdmin }) {
         detalle[`${p.nombre} (${p.medida})`] = cant
       })
       if (totalOz === 0) { setResultadoLibre({ vacio: true }); return }
-
-      const recetaIngredientes = recetaLibre.ingredientes?.length > 0
-        ? recetaLibre.ingredientes : (recetaLibre.secciones?.[0]?.ingredientes || [])
+      const recetaIngredientes = recetaLibre.ingredientes?.length > 0 ? recetaLibre.ingredientes : (recetaLibre.secciones?.[0]?.ingredientes || [])
       const ozBase = recetaIngredientes.reduce((acc, i) => acc + Number(i.oz || 0), 0)
       const factor = ozBase > 0 ? totalOz / ozBase : 0
-
       setResultadoLibre({
         vacio: false, receta: recetaLibre,
         totalFactor: totalOz.toFixed(2), factor: factor.toFixed(4), usaPeso: true,
@@ -245,11 +234,9 @@ export default function Recetas({ isAdmin }) {
       return
     }
 
-    // Receta normal — detectar si es por oz o por unidades
     const tieneProductosPeso = prods.some(p => esUnidadPeso(p.medida))
 
     if (tieneProductosPeso) {
-      // Suma de oz por producto
       let totalOz = 0
       const detalle = {}
       prods.forEach(p => {
@@ -261,11 +248,9 @@ export default function Recetas({ isAdmin }) {
         detalle[`${p.nombre} (${p.medida})`] = cant
       })
       if (totalOz === 0) { setResultadoLibre({ vacio: true }); return }
-
       const secciones = normalizarSecciones(recetaLibre)
       const masaBaseOz = secciones[0]?.ingredientes?.reduce((acc, i) => acc + Number(i.oz || 0), 0) || 0
       const factor = masaBaseOz > 0 ? totalOz / masaBaseOz : 0
-
       setResultadoLibre({
         vacio: false, receta: recetaLibre,
         totalFactor: totalOz.toFixed(2), factor: factor.toFixed(4), usaPeso: true,
@@ -273,7 +258,6 @@ export default function Recetas({ isAdmin }) {
         detalle
       })
     } else {
-      // Por unidades (latas, etc.)
       let totalUnidades = 0
       const detalle = {}
       prods.forEach(p => {
@@ -283,10 +267,8 @@ export default function Recetas({ isAdmin }) {
         detalle[`${p.nombre} (${p.medida})`] = cant
       })
       if (totalUnidades === 0) { setResultadoLibre({ vacio: true }); return }
-
       const secciones = normalizarSecciones(recetaLibre)
       const factor = totalUnidades
-
       setResultadoLibre({
         vacio: false, receta: recetaLibre,
         totalFactor: totalUnidades.toString(), factor: factor.toFixed(4), usaPeso: false,
@@ -298,11 +280,9 @@ export default function Recetas({ isAdmin }) {
 
   const confirmarProduccionLibre = async () => {
     if (!resultadoLibre || resultadoLibre.vacio) return
-    setConfirmandoLibre(true)
-    setMsgConfirmLibre('')
+    setConfirmandoLibre(true); setMsgConfirmLibre('')
     try {
-      const actualizados = []
-      const noEncontrados = []
+      const actualizados = []; const noEncontrados = []
       const todosLosIngredientes = resultadoLibre.seccionesCalculadas.flatMap(sec => sec.ingredientes)
       for (const ing of todosLosIngredientes) {
         const materia = inventario.find(m => m.nombre.toLowerCase().trim() === ing.nombre.toLowerCase().trim())
@@ -317,21 +297,15 @@ export default function Recetas({ isAdmin }) {
       let msgFinal = `✅ Producción confirmada. ${actualizados.length} ingrediente${actualizados.length !== 1 ? 's' : ''} descontado${actualizados.length !== 1 ? 's' : ''} del inventario.`
       if (noEncontrados.length > 0) msgFinal += ` Sin match en inventario: ${noEncontrados.join(', ')}.`
       setMsgConfirmLibre(msgFinal)
-    } catch (e) {
-      setMsgConfirmLibre('⚠️ Error al confirmar producción.')
-    }
+    } catch (e) { setMsgConfirmLibre('⚠️ Error al confirmar producción.') }
     setConfirmandoLibre(false)
   }
 
-  // ── CONFIRMAR PRODUCCIÓN (modo pedidos) ───────────────────────
-
   const confirmarProduccion = async () => {
     if (!resultado || resultado.vacio) return
-    setConfirmando(true)
-    setMsgConfirm('')
+    setConfirmando(true); setMsgConfirm('')
     try {
-      const actualizados = []
-      const noEncontrados = []
+      const actualizados = []; const noEncontrados = []
       const todosLosIngredientes = resultado.seccionesCalculadas.flatMap(sec => sec.ingredientes)
       for (const ing of todosLosIngredientes) {
         const materia = inventario.find(m => m.nombre.toLowerCase().trim() === ing.nombre.toLowerCase().trim())
@@ -346,29 +320,21 @@ export default function Recetas({ isAdmin }) {
       let msgFinal = `✅ Producción confirmada. ${actualizados.length} ingrediente${actualizados.length !== 1 ? 's' : ''} descontado${actualizados.length !== 1 ? 's' : ''} del inventario.`
       if (noEncontrados.length > 0) msgFinal += ` Sin match en inventario: ${noEncontrados.join(', ')}.`
       setMsgConfirm(msgFinal)
-    } catch (e) {
-      setMsgConfirm('⚠️ Error al confirmar producción.')
-    }
+    } catch (e) { setMsgConfirm('⚠️ Error al confirmar producción.') }
     setConfirmando(false)
   }
-
-  // ── FORM RECETAS ──────────────────────────────────────────────
 
   const guardarReceta = async () => {
     if (!formNombre.trim() || !formGrupoId) { setMsg('⚠️ Completá nombre y grupo'); return }
     if (!formEsBaseCompartida && !formSubgrupo.trim()) { setMsg('⚠️ Completá el subgrupo'); return }
-
     let datos = { nombre: formNombre.trim(), grupoId: formGrupoId, subgrupo: formSubgrupo.trim(), esBaseCompartida: formEsBaseCompartida }
-
     if (formEsBaseCompartida) {
       const ingValidos = formIngredientes.filter(i => i.nombre.trim() && i.oz)
       if (ingValidos.length === 0) { setMsg('⚠️ Agregá al menos un ingrediente'); return }
       datos.ingredientes = ingValidos.map(i => ({ nombre: i.nombre.trim(), oz: parseFloat(i.oz) }))
       datos.secciones = []
     } else if (formUsaSecciones) {
-      const seccionesValidas = formSecciones
-        .map(sec => ({ nombre: sec.nombre.trim(), ingredientes: sec.ingredientes.filter(i => i.nombre.trim() && i.oz) }))
-        .filter(sec => sec.nombre && sec.ingredientes.length > 0)
+      const seccionesValidas = formSecciones.map(sec => ({ nombre: sec.nombre.trim(), ingredientes: sec.ingredientes.filter(i => i.nombre.trim() && i.oz) })).filter(sec => sec.nombre && sec.ingredientes.length > 0)
       if (seccionesValidas.length === 0) { setMsg('⚠️ Agregá al menos una sección'); return }
       datos.secciones = seccionesValidas.map(sec => ({ nombre: sec.nombre, ingredientes: sec.ingredientes.map(i => ({ nombre: i.nombre.trim(), oz: parseFloat(i.oz) })) }))
       datos.ingredientes = []
@@ -378,7 +344,6 @@ export default function Recetas({ isAdmin }) {
       datos.ingredientes = ingValidos.map(i => ({ nombre: i.nombre.trim(), oz: parseFloat(i.oz) }))
       datos.secciones = []
     }
-
     setGuardando(true)
     if (editandoId) {
       await updateDoc(doc(db, 'recetas', editandoId), datos)
@@ -414,18 +379,15 @@ export default function Recetas({ isAdmin }) {
   }
 
   const eliminar = async (id) => { await deleteDoc(doc(db, 'recetas', id)); setConfirmEliminar(null) }
-
   const agregarIngrediente = () => setFormIngredientes([...formIngredientes, { nombre: '', oz: '' }])
   const quitarIngrediente = (idx) => setFormIngredientes(formIngredientes.filter((_, i) => i !== idx))
   const actualizarIngrediente = (idx, campo, valor) => { const n = [...formIngredientes]; n[idx][campo] = valor; setFormIngredientes(n) }
-
   const agregarSeccion = () => setFormSecciones([...formSecciones, seccionVacia()])
   const quitarSeccion = (si) => setFormSecciones(formSecciones.filter((_, i) => i !== si))
   const actualizarNombreSeccion = (si, valor) => { const n = [...formSecciones]; n[si] = { ...n[si], nombre: valor }; setFormSecciones(n) }
   const agregarIngSeccion = (si) => { const n = [...formSecciones]; n[si] = { ...n[si], ingredientes: [...n[si].ingredientes, { nombre: '', oz: '' }] }; setFormSecciones(n) }
   const quitarIngSeccion = (si, ii) => { const n = [...formSecciones]; n[si] = { ...n[si], ingredientes: n[si].ingredientes.filter((_, i) => i !== ii) }; setFormSecciones(n) }
   const actualizarIngSeccion = (si, ii, campo, valor) => { const n = [...formSecciones]; const ings = [...n[si].ingredientes]; ings[ii] = { ...ings[ii], [campo]: valor }; n[si] = { ...n[si], ingredientes: ings }; setFormSecciones(n) }
-
   const sugerenciasSimple = (idx) => { const t = formIngredientes[idx]?.nombre || ''; if (!t.trim()) return []; return inventario.map(m => m.nombre).filter(n => n.toLowerCase().includes(t.toLowerCase())).sort() }
   const sugerenciasSeccion = (si, ii) => { const t = formSecciones[si]?.ingredientes[ii]?.nombre || ''; if (!t.trim()) return []; return inventario.map(m => m.nombre).filter(n => n.toLowerCase().includes(t.toLowerCase())).sort() }
 
@@ -435,6 +397,36 @@ export default function Recetas({ isAdmin }) {
     { key:'calcular', label:'🧮 Calcular' },
     ...(isAdmin ? [{ key:'gestionar', label:'⚙️ Gestionar' }] : [])
   ]
+
+  // Selector de recetas agrupado por grupo
+  const renderSelectorRecetas = (recetaActiva, onSelect) => (
+    <>
+      {grupos.map(g => {
+        const recetasGrupo = recetas.filter(r => r.grupoId === g.id)
+        if (recetasGrupo.length === 0) return null
+        return (
+          <div key={g.id} style={{ marginBottom:'16px' }}>
+            <p style={{ fontSize:'11px', fontWeight:'bold', color: G.cafe, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px', borderLeft:`3px solid ${G.cafe}`, paddingLeft:'8px' }}>
+              {g.nombre}
+            </p>
+            <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
+              {recetasGrupo.map(r => (
+                <button key={r.id} onClick={() => onSelect(r)}
+                  style={{ padding:'10px 16px', borderRadius:'8px',
+                    border:`2px solid ${recetaActiva?.id === r.id ? G.cafe : G.borde}`,
+                    background: recetaActiva?.id === r.id ? G.cafe : 'white',
+                    color: recetaActiva?.id === r.id ? 'white' : G.texto,
+                    cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>
+                  {r.nombre}
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+      <div style={{ marginBottom:'20px' }} />
+    </>
+  )
 
   const renderResultado = (res, onConfirmar, confirmando_, msgConfirm_) => (
     <>
@@ -546,7 +538,6 @@ export default function Recetas({ isAdmin }) {
           <>
             <h3 style={{ color: G.cafe, marginBottom:'16px' }}>🧮 Calcular receta</h3>
 
-            {/* Sub-tabs modo */}
             <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
               {[{ val:'pedidos', label:'📦 Por pedidos del día' }, { val:'libre', label:'🔢 Cantidad libre' }].map(op => (
                 <button key={op.val} onClick={() => { setModoCalculo(op.val); setResultado(null); setResultadoLibre(null); setRecetaLibre(null); setCantidadesLibres({}) }}
@@ -611,19 +602,8 @@ export default function Recetas({ isAdmin }) {
 
                 {turnoConfirmado && (
                   <>
-                    <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Seleccionar receta</p>
-                    <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'20px' }}>
-                      {recetas.map(r => (
-                        <button key={r.id} onClick={() => calcular(r)}
-                          style={{ padding:'10px 16px', borderRadius:'8px',
-                            border:`2px solid ${recetaSeleccionada?.id === r.id ? G.cafe : G.borde}`,
-                            background: recetaSeleccionada?.id === r.id ? G.cafe : 'white',
-                            color: recetaSeleccionada?.id === r.id ? 'white' : G.texto,
-                            cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>
-                          {r.nombre}
-                        </button>
-                      ))}
-                    </div>
+                    <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'12px' }}>Seleccionar receta</p>
+                    {renderSelectorRecetas(recetaSeleccionada, calcular)}
 
                     {resultado?.vacio && (
                       <div style={{ background:'white', padding:'16px', borderRadius:'10px', textAlign:'center', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
@@ -648,19 +628,8 @@ export default function Recetas({ isAdmin }) {
                   </p>
                 </div>
 
-                <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'8px' }}>Seleccionar receta</p>
-                <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'20px' }}>
-                  {recetas.map(r => (
-                    <button key={r.id} onClick={() => seleccionarRecetaLibre(r)}
-                      style={{ padding:'10px 16px', borderRadius:'8px',
-                        border:`2px solid ${recetaLibre?.id === r.id ? G.cafe : G.borde}`,
-                        background: recetaLibre?.id === r.id ? G.cafe : 'white',
-                        color: recetaLibre?.id === r.id ? 'white' : G.texto,
-                        cursor:'pointer', fontSize:'13px', fontWeight:'bold' }}>
-                      {r.nombre}
-                    </button>
-                  ))}
-                </div>
+                <p style={{ fontSize:'12px', fontWeight:'bold', color: G.gris, textTransform:'uppercase', letterSpacing:'1px', marginBottom:'12px' }}>Seleccionar receta</p>
+                {renderSelectorRecetas(recetaLibre, seleccionarRecetaLibre)}
 
                 {recetaLibre && (
                   <>
@@ -673,11 +642,9 @@ export default function Recetas({ isAdmin }) {
                           <p style={{ fontSize:'12px', color: G.gris, marginBottom:'16px' }}>
                             {tieneProductosPeso ? 'Ingresá la cantidad de cada presentación' : 'Ingresá la cantidad de unidades a producir'}
                           </p>
-
                           {prods.length === 0 && (
                             <p style={{ color: G.gris, fontSize:'13px', textAlign:'center' }}>No hay productos vinculados a esta receta.</p>
                           )}
-
                           {prods.map(p => (
                             <div key={p.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px' }}>
                               <div>
@@ -690,7 +657,6 @@ export default function Recetas({ isAdmin }) {
                                 style={{ width:'80px', padding:'10px', borderRadius:'8px', border:`1px solid ${G.borde}`, textAlign:'center', fontSize:'16px', fontWeight:'bold', color: G.cafe }} />
                             </div>
                           ))}
-
                           <button onClick={calcularLibre}
                             style={{ width:'100%', padding:'13px', background: G.cafe, color:'white', border:'none', borderRadius:'10px', cursor:'pointer', fontWeight:'bold', fontSize:'15px', marginTop:'8px' }}>
                             🧮 Calcular ingredientes
